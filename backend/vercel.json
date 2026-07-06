@@ -1,0 +1,14 @@
+{
+  "functions": {
+    "api/index.js": {
+      "memory": 512,
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index" }
+  ],
+  "env": {
+    "DATABASE_URL": "postgresql://neondb_owner:npg_q3zRB4hiGEsk@ep-calm-bar-atzg09ti.c-9.us-east-1.aws.neon.tech/neondb?sslmode=require"
+  }
+}

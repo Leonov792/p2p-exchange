@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Admin</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 20px; }
+        h1 { font-size: 20px; margin-bottom: 20px; color: #58a6ff; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th, td { padding: 8px 6px; text-align: left; border-bottom: 1px solid #21262d; }
+        th { color: #8b949e; font-weight: 600; }
+        .btn { padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 10px; font-weight: 600; }
+        .btn-resolve-buyer { background: #238636; color: #fff; }
+        .btn-resolve-seller { background: #da3633; color: #fff; }
+        .tab-btn { padding: 8px 16px; background: #21262d; border: none; color: #8b949e; cursor: pointer; margin-right: 4px; }
+        .tab-btn.active { background: #1f6feb; color: #fff; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+        .stat-box { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px; text-align: center; }
+        .stat-box .num { font-size: 24px; font-weight: 700; color: #58a6ff; }
+        .stat-box .lbl { font-size: 10px; color: #8b949e; }
+    </style>
+</head>
+<body>
+    <h1>P2P Exchange Admin</h1>
+    <div class="stats-grid" id="adminStats"></div>
+    <div style="margin-bottom:14px">
+        <button class="tab-btn active" onclick="loadDeals()">Deals</button>
+        <button class="tab-btn" onclick="loadDisputes()">Disputes</button>
+    </div>
+    <table id="dataTable"><thead><tr><th>ID</th><th>Buyer</th><th>Seller</th><th>USDT</th><th>RUB</th><th>Status</th><th>Action</th></tr></thead><tbody></tbody></table>
+
+    <script>
+        const API = 'https://p2p-exchange-api.vercel.app/api';
+        async function fetchApi(path) { const r = await fetch(API + path, { headers: { 'X-Telegram-User-ID': '0' } }); return r.json(); }
+
+        async function loadStats() {
+            const d = await fetchApi('/admin/stats');
+            document.getElementById('adminStats').innerHTML = `
+                <div class="stat-box"><div class="num">${d.openDisputes || 0}</div><div class="lbl">Open Disputes</div></div>
+                <div class="stat-box"><div class="num">${d.daily[0]?.deals_count || 0}</div><div class="lbl">Today Deals</div></div>
+                <div class="stat-box"><div class="num">${d.daily[0]?.volume_rub ? (d.daily[0].volume_rub/1000000).toFixed(1)+'M' : 0}</div><div class="lbl">Volume RUB</div></div>
+                <div class="stat-box"><div class="num">${d.daily[0]?.volume_usdt ? (d.daily[0].volume_usdt/1000).toFixed(1)+'K' : 0}</div><div class="lbl">Volume USDT</div></div>
+            `;
+        }
+
+        async function loadDeals() {
+            const d = await fetchApi('/admin/deals');
+            const tbody = document.querySelector('#dataTable tbody');
+            tbody.innerHTML = d.map(r => `
+                <tr>
+                    <td>${r.id.slice(0,8)}</td><td>${r.buyer_name}</td><td>${r.seller_name}</td>
+                    <td>${Number(r.amount_usdt).toFixed(2)}</td><td>${Number(r.total_rub).toLocaleString('ru')}</td>
+                    <td>${r.status}</td><td></td>
+                </tr>
+            `).join('');
+        }
+
+        async function resolveDispute(disputeId, decision) {
+            await fetch(API + '/admin/disputes/' + disputeId, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-Telegram-User-ID': '0' },
+                body: JSON.stringify({ decision }),
+            });
+            loadDisputes();
+        }
+
+        async function loadDisputes() {
+            const d = await fetchApi('/admin/stats');
+            const tbody = document.querySelector('#dataTable tbody');
+            const h = document.querySelector('#dataTable thead tr');
+            h.innerHTML = '<th>ID</th><th>Initiator</th><th>Reason</th><th>Status</th><th>Action</th>';
+            const disputes = []; // populated from admin/disputes endpoint (future)
+            tbody.innerHTML = `<tr><td colspan="5">${d.openDisputes || 0} open disputes</td></tr>`;
+        }
+
+        loadStats(); loadDeals();
+    </script>
+</body>
+</html>

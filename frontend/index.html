@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>P2P Exchange</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div class="header">
+        <span class="logo">P2P Exchange</span>
+        <div class="header-info">
+            <span class="rate" id="rateDisplay">1 USDT = 92.50 RUB</span>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab active" data-tab="buy">BUY USDT</button>
+        <button class="tab" data-tab="sell">SELL USDT</button>
+        <button class="tab" data-tab="deals">MY DEALS</button>
+        <button class="tab" data-tab="profile">PROFILE</button>
+    </div>
+
+    <div class="tab-content active" id="tab-buy">
+        <div class="offers-filter">
+            <select id="paymentFilter" class="select">
+                <option value="">All payment methods</option>
+                <option value="SBP">SBP</option>
+                <option value="T-Bank">T-Bank</option>
+                <option value="Sberbank">Sberbank</option>
+                <option value="Raiffeisen">Raiffeisen</option>
+            </select>
+            <select id="sortFilter" class="select">
+                <option value="price">Cheapest first</option>
+                <option value="rating">Best rating first</option>
+            </select>
+        </div>
+        <div class="offers-list" id="offersBuy"></div>
+    </div>
+
+    <div class="tab-content" id="tab-sell">
+        <div class="offers-filter">
+            <select id="paymentFilterSell" class="select">
+                <option value="">All payment methods</option>
+                <option value="SBP">SBP</option>
+                <option value="T-Bank">T-Bank</option>
+                <option value="Sberbank">Sberbank</option>
+            </select>
+            <select id="sortFilterSell" class="select">
+                <option value="price">Best price first</option>
+                <option value="rating">Best rating first</option>
+            </select>
+        </div>
+        <div class="offers-list" id="offersSell"></div>
+    </div>
+
+    <div class="tab-content" id="tab-deals">
+        <div class="deals-list" id="dealsList"></div>
+    </div>
+
+    <div class="tab-content" id="tab-profile">
+        <div class="profile-section" id="profileSection"></div>
+    </div>
+
+    <div class="stats-bar" id="statsBar"></div>
+
+    <!-- Create Offer Modal -->
+    <div class="modal" id="createOfferModal">
+        <div class="modal-content">
+            <h3>Create Offer</h3>
+            <div class="form-group">
+                <label>Type</label>
+                <select id="offerType" class="input">
+                    <option value="sell">Sell USDT</option>
+                    <option value="buy">Buy USDT</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Amount (USDT)</label>
+                <input type="number" id="offerAmount" class="input" placeholder="1000" step="0.01" min="1">
+            </div>
+            <div class="form-group">
+                <label>Price per USDT (RUB)</label>
+                <input type="number" id="offerPrice" class="input" placeholder="92.50" step="0.01" min="0.01">
+            </div>
+            <div class="form-group">
+                <label>Min amount (RUB)</label>
+                <input type="number" id="offerMin" class="input" placeholder="5000" step="1" min="0">
+            </div>
+            <div class="form-group">
+                <label>Max amount (RUB)</label>
+                <input type="number" id="offerMax" class="input" placeholder="50000" step="1" min="0">
+            </div>
+            <div class="form-group">
+                <label>Payment methods (comma separated)</label>
+                <input type="text" id="offerPayMethods" class="input" placeholder="SBP, T-Bank, Sberbank">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" id="btnCancelOffer">Cancel</button>
+                <button class="btn-primary" id="btnCreateOffer">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deal Detail Modal -->
+    <div class="modal" id="dealModal">
+        <div class="modal-content" id="dealModalContent"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
