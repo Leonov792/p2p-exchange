@@ -9,9 +9,59 @@ let offersBuy = [];
 let offersSell = [];
 let myDeals = [];
 
+// ========== TON CONNECT ==========
+let tonConnect = null;
+let connectedWallet = null;
+
+function initTonConnect() {
+    if (typeof window.TonConnectUI === 'undefined') return;
+    tonConnect = new window.TonConnectUI({
+        manifestUrl: 'https://p2p-exchange-sigma.vercel.app/tonconnect-manifest.json',
+        buttonRootId: 'btnConnectWallet',
+    });
+    tonConnect.onStatusChange((wallet) => {
+        if (wallet) {
+            connectedWallet = wallet.account.address;
+            document.getElementById('btnConnectWallet').textContent =
+                connectedWallet.slice(0, 6) + '...' + connectedWallet.slice(-4);
+            document.getElementById('btnConnectWallet').classList.add('connected');
+        } else {
+            connectedWallet = null;
+            document.getElementById('btnConnectWallet').textContent = 'Connect TON';
+            document.getElementById('btnConnectWallet').classList.remove('connected');
+        }
+    });
+}
+
+// ========== TELEGRAM STARS ==========
+async function payWithStars(amount, description) {
+    if (!tg || !tg.isVersionAtLeast('6.1')) {
+        toast('Telegram Stars require Telegram 6.1+');
+        return false;
+    }
+    try {
+        const result = await tg.showPopup({
+            title: 'Pay with Stars',
+            message: `${amount} Stars — ${description}`,
+            buttons: [
+                { type: 'ok', text: 'Pay' },
+                { type: 'cancel', text: 'Cancel' },
+            ],
+        });
+        if (result === 'ok') {
+            await api('/stars/pay', 'POST', { amount, description });
+            return true;
+        }
+    } catch (e) {
+        console.error('Stars payment error:', e);
+    }
+    return false;
+}
+
 // ========== INIT ==========
 document.addEventListener('DOMContentLoaded', () => {
     if (tg) { tg.ready(); tg.expand(); }
+    initTonConnect();
     initAuth();
     initTabs();
     initButtons();

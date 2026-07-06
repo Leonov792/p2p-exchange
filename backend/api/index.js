@@ -175,6 +175,20 @@ module.exports = async (req, res) => {
       return json(res, { success: true, status: "disputed" });
     }
 
+    // Stars payment
+    if (path === "/stars/pay" && req.method === "POST") {
+      const { amount, description } = req.body || {};
+      if (!amount) return json(res, { error: "amount required" }, 400);
+      await pool.query("INSERT INTO deals (offer_id, buyer_id, seller_id, amount_usdt, total_rub, payment_method, status) VALUES ($1,$2,$3,$4,$5,$6,'stars_paid')",
+        [null, uid, 0, amount, amount, "STARS"]);
+      return json(res, { success: true, stars: amount });
+    }
+
+    if (path === "/stars/balance") {
+      const { rows } = await pool.query("SELECT COALESCE(SUM(total_rub),0) as total FROM deals WHERE buyer_id=$1 AND payment_method='STARS' AND status='stars_paid'", [uid]);
+      return json(res, { balance: rows[0]?.total || 0 });
+    }
+
     // GET/PUT /api/profile
     if (path === "/profile" && req.method === "GET") {
       const { rows } = await pool.query(
