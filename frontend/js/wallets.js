@@ -1,16 +1,14 @@
-// Wallet Connect — Self-contained, auto-init
+// Wallet Connect — All 7 Wallets (fixed)
 // ============================================
 (function() {
     const API = 'https://p2p-exchange-api.vercel.app/api';
     let connected = null;
 
-    async function apiCall(path, method = 'GET', body = null) {
+    function apiCall(path, method = 'GET', body = null) {
         const h = { 'Content-Type': 'application/json' };
-        if (window._currentUser) h['X-Telegram-User-ID'] = String(window._currentUser.id);
-        try {
-            const r = await fetch(API + path, { method, headers: h, body: body ? JSON.stringify(body) : null });
-            return r.ok ? r.json() : null;
-        } catch { return null; }
+        const uid = localStorage.getItem('p2p_user_id') || '';
+        if (uid) h['X-Telegram-User-ID'] = uid;
+        try { return fetch(API + path, { method, headers: h, body: body ? JSON.stringify(body) : null }).then(r => r.json()); } catch { return null; }
     }
 
     function toast(msg) {
@@ -20,10 +18,7 @@
         setTimeout(() => t.classList.remove('show'), 3000);
     }
 
-    function setStatus(text) {
-        const el = document.getElementById('connectStatus');
-        if (el) el.textContent = text;
-    }
+    function setStatus(text) { const el = document.getElementById('connectStatus'); if (el) el.textContent = text; }
 
     function updateUI(shortAddr, balance) {
         const btn = document.getElementById('btnConnectWallet');
@@ -32,18 +27,17 @@
         if (bal && balance !== undefined) bal.textContent = Number(balance).toFixed(2) + ' USDT';
     }
 
-    // ========== INIT MODAL ==========
+    // ========== INIT ==========
     document.addEventListener('DOMContentLoaded', function() {
         const modal = document.getElementById('connectModal');
         const btn = document.getElementById('btnConnectWallet');
         const cancel = document.getElementById('btnCancelConnect');
-        if (!modal || !btn) return console.log('Connect modal elements not found');
+        if (!modal || !btn) return;
 
         btn.onclick = function() {
             if (connected) { connected = null; btn.textContent = 'Connect Wallet'; btn.classList.remove('connected'); updateUI('0.00 USDT', 0); return; }
             modal.classList.add('active');
         };
-
         cancel.onclick = function() { modal.classList.remove('active'); };
         modal.addEventListener('click', function(e) { if (e.target === modal) modal.classList.remove('active'); });
 
@@ -61,7 +55,7 @@
                 } else if (wallet === 'metamask' || wallet === 'trustwallet') {
                     result = await connectEVM(wallet);
                 } else if (wallet === 'phantom') {
-                    result = await connectPhantom();
+                    result = await connectPhantomReal();
                 } else if (wallet === 'telegram') {
                     result = await connectTelegram();
                 }
@@ -76,7 +70,7 @@
                 modal.classList.remove('active');
                 toast('Connected: ' + (result.label || wallet));
             } else {
-                setStatus('Failed. Try again.');
+                setStatus('Not found. Open ' + wallet + ' app first.');
             }
         });
     });
@@ -84,51 +78,73 @@
     // ========== TON WALLETS ==========
     async function connectTON(app) {
         const dappUrl = 'https://p2p-exchange-sigma.vercel.app';
-        let url = 'https://app.tonkeeper.com/ton-login?url=' + encodeURIComponent(dappUrl);
-        if (app === 'tonhub') url = 'https://tonhub.com/ton-connect/?' + encodeURIComponent(dappUrl);
-        if (app === 'mytonwallet') url = 'https://mytonwallet.app/ton-connect?url=' + encodeURIComponent(dappUrl);
+        setStatus('Opening ' + app + '...');
+        if (app === 'tonkeeper') window.open('https://app.tonkeeper.com/ton-login?url=' + encodeURIComponent(dappUrl), '_blank');
+        else if (app === 'tonhub') window.open('https://tonhub.com/ton-connect/?' + encodeURIComponent(dappUrl), '_blank');
+        else window.open('https://mytonwallet.app/ton-connect?url=' + encodeURIComponent(dappUrl), '_blank');
 
-        window.open(url, '_blank');
-        setStatus('Return to this page after connecting...');
+        const addr = prompt('Enter your TON wallet address (starts with UQ):', '');
+        if (!addr || !addr.startsWith('UQ')) return null;
 
-        return new Promise(function(resolve) {
-            setTimeout(function() {
-                const addr = 'UQ' + Date.now().toString(36).toUpperCase();
-                resolve({ address: addr, chain: 'ton', shortAddr: addr.slice(0,8)+'...'+addr.slice(-4), label: app, balance: 0 });
-                toast('Connected via ' + app + '. Deposit USDT on the platform to start trading.');
-            }, 2000);
-        });
+        await apiCall('/wallet/sync', 'POST', { address: addr, chain: 'ton', balance: 0 });
+        return { address: addr, chain: 'ton', shortAddr: addr.slice(0,8)+'...'+addr.slice(-4), label: app, balance: 0 };
     }
 
-    // ========== EVM WALLETS (MetaMask, Trust Wallet) ==========
+    // ========== EVM WALLETS ==========
     async function connectEVM(wallet) {
         if (window.ethereum) {
             try {
-                setStatus('Requesting MetaMask...');
+                setStatus('Requesting ' + wallet + '...');
                 const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
                 if (accounts && accounts[0]) {
                     const addr = accounts[0];
+                    await apiCall('/wallet/sync', 'POST', { address: addr, chain: 'evm', balance: 0 });
                     return { address: addr, chain: 'evm', shortAddr: addr.slice(0,6)+'...'+addr.slice(-4), label: wallet, balance: 0 };
                 }
-            } catch(e) { console.error('EVM error:', e); }
+            } catch(e) { console.error(wallet, e); }
         }
+        setStatus(wallet + ' not detected. Opening app...');
         if (wallet === 'metamask') window.open('https://metamask.app.link/dapp/p2p-exchange-sigma.vercel.app', '_blank');
         else window.open('https://link.trustwallet.com/open_url?url=https://p2p-exchange-sigma.vercel.app', '_blank');
-        toast('Open ' + wallet + ' app and return.');
-        return null;
+
+        const addr = prompt('Paste your ' + wallet + ' address (0x...):', '');
+        if (!addr || !addr.startsWith('0x')) return null;
+        await apiCall('/wallet/sync', 'POST', { address: addr, chain: 'evm', balance: 0 });
+        return { address: addr, chain: 'evm', shortAddr: addr.slice(0,6)+'...'+addr.slice(-4), label: wallet, balance: 0 };
     }
 
-    // ========== PHANTOM ==========
-    async function connectPhantom() {
+    // ========== PHANTOM (Solana + EVM) ==========
+    async function connectPhantomReal() {
+        setStatus('Detecting Phantom...');
+
         if (window.solana && window.solana.isPhantom) {
             try {
                 const resp = await window.solana.connect();
                 const addr = resp.publicKey.toString();
+                await apiCall('/wallet/sync', 'POST', { address: addr, chain: 'solana', balance: 0 });
                 return { address: addr, chain: 'solana', shortAddr: addr.slice(0,8)+'...'+addr.slice(-4), label: 'Phantom', balance: 0 };
-            } catch(e) { console.error('Solana error:', e); }
+            } catch(e) {}
         }
+
+        if (window.ethereum) {
+            try {
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                if (accounts && accounts[0]) {
+                    const addr = accounts[0];
+                    await apiCall('/wallet/sync', 'POST', { address: addr, chain: 'evm', balance: 0 });
+                    return { address: addr, chain: 'evm', shortAddr: addr.slice(0,6)+'...'+addr.slice(-4), label: 'Phantom', balance: 0 };
+                }
+            } catch(e) {}
+        }
+
         window.open('https://phantom.app/ul/browse/' + encodeURIComponent('https://p2p-exchange-sigma.vercel.app'), '_blank');
-        return null;
+        setStatus('Open Phantom browser and return...');
+
+        const addr = prompt('Paste your Phantom address (Solana or 0x...):', '');
+        if (!addr) return null;
+        const chain = addr.startsWith('0x') ? 'evm' : 'solana';
+        await apiCall('/wallet/sync', 'POST', { address: addr, chain, balance: 0 });
+        return { address: addr, chain, shortAddr: addr.slice(0,8)+'...'+addr.slice(-4), label: 'Phantom', balance: 0 };
     }
 
     // ========== TELEGRAM WALLET ==========
@@ -139,30 +155,22 @@
             const uid = tg.initDataUnsafe?.user?.id || Date.now();
             return { address: 'tg:' + uid, chain: 'telegram', shortAddr: 'TG:' + String(uid).slice(-6), label: 'Telegram', balance: 0 };
         }
-        toast('Open in Telegram Mini App.');
-        return null;
+        window.open('https://t.me/wallet', '_blank');
+        const addr = prompt('Enter your Telegram Wallet TON address:', '');
+        if (!addr) return null;
+        return { address: addr, chain: 'ton', shortAddr: addr.slice(0,8)+'...'+addr.slice(-4), label: 'Telegram', balance: 0 };
     }
 
-    // ========== REAL USDT SEND (for TON) ==========
+    // ========== SEND USDT ==========
     window._sendUSDT = async function(amount, dealId) {
         if (!connected) { toast('Connect wallet first.'); return null; }
 
-        if (connected.chain === 'ton') {
+        if (connected.chain === 'ton' || connected.chain === 'telegram') {
             const transfer = await apiCall('/ton/transfer', 'POST', { sender: connected.address, amount, dealId });
             if (transfer?.deepLink) {
-                showTxProgress('Opening TON wallet... Confirm the transfer, then return.');
                 window.location.href = transfer.deepLink;
-                
-                return { 
-                    success: true, 
-                    txHash: 'pending_' + Date.now(), 
-                    signedUrl: transfer.deepLink,
-                    returnUrl: transfer.returnUrl,
-                    instructions: transfer.instructions 
-                };
+                return { success: true, txHash: 'pending_' + Date.now(), signedUrl: transfer.deepLink };
             }
-            toast('Transfer generation failed.');
-            return null;
         }
 
         if (connected.chain === 'evm' && window.ethereum) {
@@ -171,38 +179,17 @@
                 const to = '0x0000000000000000000000000000000000000000';
                 const valueHex = '0x' + Math.floor(amount * 1e6).toString(16);
                 const data = '0xa9059cbb' + to.slice(2).padStart(64,'0') + valueHex.slice(2).padStart(64,'0');
-                
-                showTxProgress('Confirm in MetaMask...');
                 const txHash = await window.ethereum.request({
                     method: 'eth_sendTransaction',
-                    params: [{ from: connected.address, to: USDT, data, gas: '0x186A0' }],
+                    params: [{ from: connected.address, to: USDT, data, gas: '0x186A0' }]
                 });
-                hideTxProgress();
                 return { success: true, txHash };
-            } catch(e) { 
-                hideTxProgress();
-                toast('Transaction rejected.'); 
-                return null; 
-            }
+            } catch(e) { toast('Transaction rejected.'); return null; }
         }
 
-        toast('Manual transfer: send ' + amount + ' USDT to guarantor wallet.');
+        toast('Send ' + amount + ' USDT to guarantor: UQAAECd3lx...');
         return null;
     };
 
-    function showTxProgress(msg) {
-        const el = document.getElementById('txProgress');
-        const txt = document.getElementById('txProgressText');
-        if (el) el.style.display = 'block';
-        if (txt) txt.textContent = msg || 'Sending USDT...';
-    }
-
-    function hideTxProgress() {
-        const el = document.getElementById('txProgress');
-        if (el) el.style.display = 'none';
-    }
-
     window._connectedWallet = function() { return connected; };
-    window._showTxProgress = showTxProgress;
-    window._hideTxProgress = hideTxProgress;
 })();

@@ -46,11 +46,14 @@ async function initAuth() {
     if (tg?.initDataUnsafe?.user) {
         const u = tg.initDataUnsafe.user;
         currentUser = { id: u.id, username: u.username, first_name: u.first_name };
-        const data = await api('/auth', 'POST', { ...u, start_param: tg.initDataUnsafe?.start_param || '' });
-        if (data) toast('Logged in as: ' + (u.first_name || u.username || u.id));
+        await api('/auth', 'POST', { ...u, start_param: tg.initDataUnsafe?.start_param || '' });
+        toast(u.first_name || u.username || 'Connected');
     } else {
-        currentUser = { id: Math.floor(Math.random() * 900000) + 100000, username: 'web_user', first_name: 'Guest' };
-        toast('Demo mode. Use Telegram for full access.');
+        const storedId = localStorage.getItem('p2p_user_id');
+        const uid = storedId ? parseInt(storedId) : (Math.floor(Math.random() * 900000) + 100000);
+        localStorage.setItem('p2p_user_id', String(uid));
+        currentUser = { id: uid, username: 'web_user', first_name: 'Trader' };
+        await api('/auth', 'POST', { id: uid, username: 'web_user' });
     }
     loadProfile();
 }
