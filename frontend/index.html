@@ -15,7 +15,7 @@
         <div class="header-info">
             <span class="rate" id="rateDisplay">1 USDT = 92.50 RUB</span>
             <span class="balance" id="balanceDisplay">0.00 USDT</span>
-            <button class="btn-connect" id="btnConnectWallet">Connect TON</button>
+            <button class="btn-connect" id="btnConnectWallet">Connect Wallet</button>
         </div>
     </div>
 
@@ -127,6 +127,47 @@
         <div class="modal-content" id="dealModalContent"></div>
     </div>
 
+    <!-- Wallet Connect Modal -->
+    <div class="modal" id="connectModal">
+        <div class="modal-content" style="max-width:360px;padding:16px">
+            <h3 style="margin-bottom:16px;text-align:center">Connect Wallet</h3>
+            <div class="wallet-grid" id="walletGrid">
+                <div class="wallet-item" data-wallet="tonkeeper">
+                    <div class="wallet-icon" style="background:#0088CC">T</div>
+                    <span class="wallet-name">Tonkeeper</span>
+                </div>
+                <div class="wallet-item" data-wallet="tonhub">
+                    <div class="wallet-icon" style="background:#0066FF">H</div>
+                    <span class="wallet-name">Tonhub</span>
+                </div>
+                <div class="wallet-item" data-wallet="mytonwallet">
+                    <div class="wallet-icon" style="background:#00A3FF">M</div>
+                    <span class="wallet-name">MyTonWallet</span>
+                </div>
+                <div class="wallet-item" data-wallet="telegram">
+                    <div class="wallet-icon" style="background:#2AABEE">TG</div>
+                    <span class="wallet-name">Telegram Wallet</span>
+                </div>
+                <div class="wallet-item" data-wallet="metamask">
+                    <div class="wallet-icon" style="background:#F6851B">Fox</div>
+                    <span class="wallet-name">MetaMask</span>
+                </div>
+                <div class="wallet-item" data-wallet="trustwallet">
+                    <div class="wallet-icon" style="background:#3375BB">TW</div>
+                    <span class="wallet-name">Trust Wallet</span>
+                </div>
+                <div class="wallet-item" data-wallet="phantom">
+                    <div class="wallet-icon" style="background:#AB9FF2">P</div>
+                    <span class="wallet-name">Phantom</span>
+                </div>
+            </div>
+            <div id="connectStatus" style="text-align:center;margin-top:12px;font-size:12px;color:#8b949e"></div>
+            <div class="modal-actions" style="margin-top:12px">
+                <button class="btn-cancel" id="btnCancelConnect" style="width:100%">Close</button>
+            </div>
+        </div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <button class="btn-float" id="btnFloatCreate" title="Create offer">+</button>
@@ -163,5 +204,6 @@
     </div>
 
     <script src="js/app.js"></script>
+    <script src="js/wallets.js"></script>
 </body>
 </html>

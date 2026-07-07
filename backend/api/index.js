@@ -293,7 +293,26 @@ module.exports = async (req, res) => {
       return json(res, { balance: 0 });
     }
 
-    // ========== WALLET: Deposit / Withdraw / Balance ==========
+    // ========== WALLET: Sync Balance ==========
+    if (path === "/wallet/sync" && req.method === "POST") {
+      const { address, chain, balance } = req.body || {};
+      if (!address) return json(res, { error: "address required" }, 400);
+
+      await pool.query(
+        "UPDATE users SET ton_wallet = COALESCE($1, ton_wallet) WHERE id = $2",
+        [address, uid]
+      );
+
+      if (balance !== undefined) {
+        await pool.query(
+          "UPDATE users SET balance = COALESCE(balance, 0) + $1 WHERE id = $2 AND COALESCE(balance, 0) < $1",
+          [balance, uid]
+        );
+      }
+
+      const user = (await pool.query("SELECT COALESCE(balance,0) as b FROM users WHERE id = $1", [uid])).rows[0];
+      return json(res, { address, chain, balance: parseFloat(user?.b || "0") });
+    }
     if (path === "/wallet/balance") {
       const balances = await getBalances(uid);
       return json(res, balances);
