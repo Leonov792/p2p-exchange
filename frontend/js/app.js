@@ -222,9 +222,9 @@ async function loadMyDeals() {
         const isSeller = d.seller_id === currentUser?.id;
         const statusColors = { created:'#d29922', locked:'#1f6feb', paid:'#58a6ff', released:'#238636', cancelled:'#30363d', disputed:'#da3633', timed_out:'#484f58' };
         let actions = '';
-        if (isSeller && d.status === 'created') actions += `<button class="btn-action btn-action-lock" onclick="dealAction('${d.id}','lock')">Lock USDT</button>`;
-        if (isBuyer && d.status === 'locked') actions += `<button class="btn-action btn-action-paid" onclick="dealAction('${d.id}','paid')">Paid RUB</button>`;
-        if (isSeller && d.status === 'paid') actions += `<button class="btn-action btn-action-confirm" onclick="dealAction('${d.id}','release')">Confirm & Release</button>`;
+        if (isSeller && d.status === 'created') actions += `<button class="btn-action btn-action-lock" onclick="dealAction('${d.id}','lock')">Send USDT (TON)</button>`;
+        if (isBuyer && d.status === 'locked') actions += `<button class="btn-action btn-action-paid" onclick="dealAction('${d.id}','paid')">I Paid RUB</button>`;
+        if (isSeller && d.status === 'paid') actions += `<button class="btn-action btn-action-confirm" onclick="dealAction('${d.id}','release')">Confirm RUB Received</button>`;
         if ((isBuyer || isSeller) && (d.status === 'locked' || d.status === 'paid')) actions += `<button class="btn-action btn-action-dispute" onclick="dealAction('${d.id}','dispute')">Dispute</button>`;
         return `
             <div class="deal-card">
@@ -234,6 +234,7 @@ async function loadMyDeals() {
                 </div>
                 <div class="deal-amount">${Number(d.amount_usdt).toFixed(2)} USDT x ${(d.total_rub/d.amount_usdt).toFixed(2)} RUB</div>
                 <div class="deal-info">Total: ${Number(d.total_rub).toLocaleString('ru')} RUB | ${d.payment_method||''}</div>
+                ${d.escrow_tx_hash ? `<div class="deal-info" style="font-family:monospace;font-size:10px;color:#58a6ff;margin-top:4px">TX: ${d.escrow_tx_hash.slice(0,16)}...</div>` : ''}
                 <div style="margin-top:6px">${actions}</div>
             </div>
         `;
@@ -241,26 +242,102 @@ async function loadMyDeals() {
 }
 
 async function dealAction(dealId, action) {
+    if (action === 'lock') {
+        await lockDealWithUSDT(dealId);
+        return;
+    }
     const prompts = {
-        lock: 'Enter TON transaction hash (or leave empty):',
-        paid: 'Confirm you have sent RUB?',
-        release: 'Confirm you received RUB?',
+        paid: 'Confirm you have sent RUB to the seller?',
+        release: 'Confirm you have received RUB on your account?',
         dispute: 'Reason for dispute:',
     };
-    const value = action === 'dispute' ? prompt(prompts.dispute) : (action === 'lock' ? prompt(prompts.lock) || '' : (confirm(prompts[action]) ? 'ok' : null));
-    if (value === null && action !== 'lock') return;
+    const value = action === 'dispute' ? prompt(prompts.dispute) : confirm(prompts[action]);
+
+    if (!value) return;
 
     toast('Processing...');
     const data = await api('/deals/' + dealId + '/' + action, 'PUT', {
-        tx_hash: action === 'lock' ? (value || '') : undefined,
+        tx_hash: undefined,
         reason: action === 'dispute' ? value : undefined,
         proof: action === 'paid' ? '' : undefined,
     });
 
     if (data) {
-        toast(action.toUpperCase() + ' — DONE!');
+        toast(action.toUpperCase() + ' done!');
         loadMyDeals();
     }
+}
+
+async function lockDealWithUSDT(dealId) {
+    if (!connectedWallet) {
+        toast('Connect TON wallet first! Use Tonkeeper or Tonhub.');
+        return;
+    }
+
+    const deals = await api('/deals');
+    const deal = deals?.find(d => d.id === dealId);
+    if (!deal) return;
+
+    toast('Generating transfer...');
+    const transfer = await api('/ton/transfer', 'POST', {
+        sender: connectedWallet,
+        amount: deal.amount_usdt,
+        dealId: dealId,
+    });
+
+    if (!transfer) {
+        toast('Transfer generation failed');
+        return;
+    }
+
+    if (window.TonConnectUI) {
+        try {
+            const tonConnect = new window.TonConnectUI({
+                manifestUrl: 'https://p2p-exchange-sigma.vercel.app/tonconnect-manifest.json',
+            });
+
+            await tonConnect.connectWallet();
+
+            toast('Confirm transfer in your wallet...');
+
+            const messages = [{
+                address: transfer.recipient,
+                amount: transfer.amount,
+                payload: transfer.payload || undefined,
+            }];
+
+            tonConnect.sendTransaction({
+                validUntil: Math.floor(Date.now() / 1000) + 300,
+                messages: messages,
+            });
+
+            setTimeout(async () => {
+                toast('Verifying on blockchain...');
+                const verify = await api('/ton/verify', 'POST', {
+                    sender: connectedWallet,
+                    amount: deal.amount_usdt,
+                    dealId: dealId,
+                });
+
+                if (verify?.confirmed) {
+                    await api('/deals/' + dealId + '/lock', 'PUT', { tx_hash: verify.txHash });
+                    toast('USDT locked! TX: ' + verify.txHash.slice(0, 10) + '...');
+                    loadMyDeals();
+                } else {
+                    toast('Waiting for blockchain confirmation... Press again when sent.');
+                }
+            }, 5000);
+            return;
+        } catch (e) {
+            console.error('TON tx error:', e);
+        }
+    }
+
+    window.open(transfer?.signedUrl || '', '_blank');
+    toast('Opened wallet. Send exactly ' + deal.amount_usdt + ' USDT. Then come back and press Lock again.');
+    setTimeout(() => {
+        window.location.href = 'https://p2p-exchange-sigma.vercel.app';
+    }, 3000);
 }
 
 // ========== PROFILE ==========
@@ -299,7 +376,7 @@ function copyReferralLink() {
     navigator.clipboard?.writeText(link).then(() => toast('Link copied!')).catch(() => toast(link));
 }
 
-// Charts
+// Charts & Live Rates
 if (typeof TradingView !== 'undefined') {
     new TradingView.widget({
         container_id: "tradingview-widget",
@@ -313,4 +390,13 @@ if (typeof TradingView !== 'undefined') {
         hide_side_toolbar: true,
         allow_symbol_change: false,
     });
+}
+
+async function loadLiveRates() {
+    try {
+        const rates = await api('/ton/rates');
+        if (rates) {
+            document.getElementById('rateDisplay').textContent = '1 TON = ' + (rates.tonRub || '500') + ' RUB | 1 USDT = ' + (rates.usdtRub || '92.5') + ' RUB';
+        }
+    } catch {}
 }

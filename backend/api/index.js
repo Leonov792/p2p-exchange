@@ -10,6 +10,7 @@ const { bindCard, verifyCardForDispute, getUserCards } = require("../lib/cards")
 const { createWeb3Escrow, releaseWeb3Escrow, checkEscrowStatus } = require("../lib/escrow-web3");
 const { checkAMLScore, blacklistWallet } = require("../lib/aml");
 const { processReferral, creditReferralCommission, getReferralStats } = require("../lib/referrals");
+const { GUARANTOR, createTransferPayload, verifyIncomingPayment, getBalance, getExchangeRateTON, calculateCommission } = require("../lib/ton-real");
 
 let migrated = false;
 
@@ -87,27 +88,38 @@ module.exports = async (req, res) => {
     return json(res, result);
   }
 
-  // POST /api/ton/transfer — generate transfer payload for client signing
+  // POST /api/ton/transfer — REAL transfer payload for TON Connect signing
   if (path === "/ton/transfer" && req.method === "POST") {
     const { sender, amount, dealId } = req.body || {};
     if (!amount) return json(res, { error: "amount required" }, 400);
-    const transfer = await createTransferRequest(sender || "", GUARANTOR, amount, dealId || "manual");
+    const transfer = await createTransferPayload(sender || "", amount, dealId || "");
     return json(res, transfer);
   }
 
-  // POST /api/ton/verify — verify a deposit
+  // POST /api/ton/verify — verify a REAL payment on blockchain
   if (path === "/ton/verify" && req.method === "POST") {
-    const { amount, from, dealId } = req.body || {};
-    const result = await verifyDeposit(amount || 0, from || "", dealId || "");
+    const { amount, sender, dealId } = req.body || {};
+    const result = await verifyIncomingPayment(sender || "", amount || 0, dealId || "");
     return json(res, result);
+  }
+
+  // GET /api/ton/balance — check REAL balance on blockchain
+  if (path === "/ton/balance") {
+    const balance = await getBalance(req.query?.address || GUARANTOR);
+    return json(res, { address: GUARANTOR, balance, network: "mainnet" });
+  }
+
+  // GET /api/ton/rates — live exchange rates
+  if (path === "/ton/rates") {
+    const rates = await getExchangeRateTON();
+    return json(res, rates);
   }
 
   // GET /api/commission
   if (path === "/commission") {
+    const info = calculateCommission(100);
     const { rows: vol } = await pool.query("SELECT COALESCE(SUM(amount_usdt),0) as v FROM commissions WHERE created_at >= NOW() - INTERVAL '30 days'");
-    const info = calculateFee(100);
-    const discount = calculateVolumeDiscount(vol[0]?.v || 0);
-    return json(res, { defaultFeePercent: info.feePercent, volumeDiscount: discount, effectiveFee: discount, platformWallet: GUARANTOR, totalVolume30d: vol[0]?.v || 0 });
+    return json(res, { ...info, totalVolume30d: vol[0]?.v || 0, platformWallet: GUARANTOR });
   }
 
   // Auth
