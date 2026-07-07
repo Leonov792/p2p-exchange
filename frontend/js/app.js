@@ -3,7 +3,6 @@
 const API = 'https://p2p-exchange-api.vercel.app/api';
 const tg = window.Telegram?.WebApp;
 let currentUser = null;
-let connectedWallet = null;
 let currentTab = 'buy';
 
 function toast(msg) {
@@ -37,7 +36,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initAuth();
     initOfferForm();
-    if (typeof initConnectModal === 'function') initConnectModal();
     loadBuyOffers();
     loadLiveRates();
     setInterval(refreshData, 15000);
@@ -55,54 +53,6 @@ async function initAuth() {
         toast('Demo mode. Use Telegram for full access.');
     }
     loadProfile();
-}
-
-// ========== TON CONNECT ==========
-function initTonConnect() {
-    const btn = document.getElementById('btnConnectWallet');
-    if (!btn) return;
-
-    btn.onclick = async () => {
-        if (connectedWallet) {
-            connectedWallet = null;
-            btn.textContent = 'Connect TON';
-            btn.classList.remove('connected');
-            toast('Wallet disconnected');
-            return;
-        }
-
-        if (typeof window.TonConnectUI === 'undefined') {
-            toast('TON Connect loading... Wait 3 seconds and try again.');
-            setTimeout(initTonConnect, 3000);
-            return;
-        }
-
-        try {
-            const tonConnectUI = new window.TonConnectUI({
-                manifestUrl: 'https://p2p-exchange-sigma.vercel.app/tonconnect-manifest.json',
-                buttonRootId: 'btnConnectWallet',
-            });
-
-            tonConnectUI.onStatusChange((wallet) => {
-                if (wallet) {
-                    connectedWallet = wallet.account?.address || wallet;
-                    btn.textContent = String(connectedWallet).slice(0, 6) + '...' + String(connectedWallet).slice(-4);
-                    btn.classList.add('connected');
-                    toast('Wallet connected: ' + String(connectedWallet).slice(0, 10) + '...');
-                    api('/profile', 'PUT', { ton_wallet: connectedWallet });
-                } else {
-                    connectedWallet = null;
-                    btn.textContent = 'Connect TON';
-                    btn.classList.remove('connected');
-                }
-            });
-
-            await tonConnectUI.connectWallet();
-        } catch (e) {
-            console.error('TON Connect error:', e);
-            toast('Wallet connection failed. Use Tonkeeper or Tonhub.');
-        }
-    };
 }
 
 // ========== TABS ==========
@@ -272,10 +222,8 @@ async function dealAction(dealId, action) {
 }
 
 async function lockDealWithUSDT(dealId) {
-    const chain = typeof window._connectedChain === 'function' ? window._connectedChain() : null;
-    const address = typeof window._connectedAddress === 'function' ? window._connectedAddress() : null;
-
-    if (!address || !chain) {
+    const w = window._connectedWallet ? window._connectedWallet() : null;
+    if (!w) {
         toast('Connect wallet first!');
         document.getElementById('connectModal')?.classList.add('active');
         return;
@@ -286,18 +234,15 @@ async function lockDealWithUSDT(dealId) {
     if (!deal) return;
 
     toast('Opening wallet... Confirm the transaction.');
-    setStatus?.('Sending ' + deal.amount_usdt + ' USDT...');
-
     const result = await window._sendUSDT(deal.amount_usdt, dealId);
 
     if (result?.success) {
-        const txHash = result.txHash || 'confirmed';
-        await api('/deals/' + dealId + '/lock', 'PUT', { tx_hash: txHash });
-        toast('TX sent! Verifying on blockchain...');
+        await api('/deals/' + dealId + '/lock', 'PUT', { tx_hash: result.txHash || 'confirmed' });
+        toast('USDT sent! Deal LOCKED.');
         loadMyDeals();
     } else if (result?.signedUrl) {
         window.open(result.signedUrl, '_blank');
-        toast('Complete the transfer in your wallet. Then press Lock.');
+        toast('Complete transfer in your wallet, then come back and press Lock again.');
     }
 }
 
