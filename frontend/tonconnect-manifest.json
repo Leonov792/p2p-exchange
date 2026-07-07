@@ -1,7 +1,7 @@
 {
   "url": "https://p2p-exchange-sigma.vercel.app",
   "name": "P2P Exchange",
-  "iconUrl": "https://p2p-exchange-sigma.vercel.app/assets/logo.png",
+  "iconUrl": "https://p2p-exchange-sigma.vercel.app/assets/icon.png",
   "termsOfUseUrl": "https://p2p-exchange-sigma.vercel.app/terms",
   "privacyPolicyUrl": "https://p2p-exchange-sigma.vercel.app/privacy"
 }
