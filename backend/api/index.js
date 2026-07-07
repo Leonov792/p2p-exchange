@@ -1,6 +1,6 @@
 const { pool, migrate } = require("../lib/db");
 const { validateInitData } = require("../lib/auth");
-const { escrowCreate, escrowLock, escrowMarkPaid, escrowRelease, escrowOpenDispute, escrowAdminResolve, STATUS } = require("../lib/escrow");
+const { escrowInitiate, escrowVerifyLock, escrowMarkPaid, escrowReleaseDeal, escrowOpenDispute, buildTransferLink, STATUS } = require("../lib/escrow-ton");
 const { processTimeouts } = require("../lib/workers/timeout");
 const { GUARANTOR, getExchangeRate, createTransferRequest, verifyDeposit } = require("../lib/ton-tx");
 const { calculateFee, calculateVolumeDiscount, processCommission } = require("../lib/commission");
@@ -192,13 +192,13 @@ module.exports = async (req, res) => {
       return json(res, { success: true });
     }
 
-    // POST /api/deals — escrowCreate
+    // POST /api/deals — escrowInitiate
     if (path === "/deals" && req.method === "POST") {
       const d = req.body || {};
       if (!d.offer_id || !d.amount_usdt) return json(res, { error: "offer_id, amount_usdt required" }, 400);
       try {
-        const deal = await escrowCreate(d.offer_id, uid, null, d.amount_usdt, 0, d.payment_method || "SBP");
-        return json(res, deal, 201);
+        const result = await escrowInitiate(d.offer_id, uid, null, d.amount_usdt, 0, d.payment_method || "SBP", null);
+        return json(res, result, 201);
       } catch (e) {
         return json(res, { error: e.message }, e.statusCode || 500);
       }
@@ -213,11 +213,11 @@ module.exports = async (req, res) => {
       return json(res, rows);
     }
 
-    // PUT /api/deals/:id/lock
+    // PUT /api/deals/:id/lock + verify on blockchain
     if (parts.length === 3 && parts[0] === "deals" && parts[2] === "lock" && req.method === "PUT") {
       try {
-        const deal = await escrowLock(parts[1], uid, req.body?.tx_hash || "");
-        return json(res, deal);
+        const result = await escrowVerifyLock(parts[1], req.body?.sender || "", req.body?.comment || "");
+        return json(res, result);
       } catch (e) {
         return json(res, { error: e.message }, e.statusCode || 500);
       }
@@ -236,7 +236,7 @@ module.exports = async (req, res) => {
     // PUT /api/deals/:id/release
     if (parts.length === 3 && parts[0] === "deals" && parts[2] === "release" && req.method === "PUT") {
       try {
-        const deal = await escrowRelease(parts[1], uid);
+        const deal = await escrowReleaseDeal(parts[1], uid);
         return json(res, deal);
       } catch (e) {
         return json(res, { error: e.message }, e.statusCode || 500);
