@@ -64,6 +64,18 @@ async function migrate() {
   `);
 
   // Add missing columns without breaking existing data
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS commissions (
+      id SERIAL PRIMARY KEY,
+      deal_id UUID REFERENCES deals(id),
+      amount_usdt DECIMAL(20,6) NOT NULL,
+      fee_usdt DECIMAL(20,6) NOT NULL,
+      fee_percent DECIMAL(4,2) DEFAULT 2.0,
+      platform_wallet TEXT DEFAULT 'UQAAECd3lxgQEr9wEV_xaYpyg_it7Vj0ysLjFe6ayXPUHHFp',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   const cols = [
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS payment_deadline TIMESTAMP",
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS confirm_deadline TIMESTAMP",

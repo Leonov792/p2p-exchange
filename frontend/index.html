@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="css/style.css">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
+    <script src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
     <div class="header">
@@ -18,9 +19,10 @@
     </div>
 
     <div class="tabs">
-        <button class="tab active" data-tab="buy">BUY USDT</button>
-        <button class="tab" data-tab="sell">SELL USDT</button>
-        <button class="tab" data-tab="deals">MY DEALS</button>
+        <button class="tab active" data-tab="buy">BUY</button>
+        <button class="tab" data-tab="sell">SELL</button>
+        <button class="tab" data-tab="charts">CHARTS</button>
+        <button class="tab" data-tab="deals">DEALS</button>
         <button class="tab" data-tab="profile">PROFILE</button>
     </div>
 
@@ -55,6 +57,20 @@
             </select>
         </div>
         <div class="offers-list" id="offersSell"></div>
+    </div>
+
+    <div class="tab-content" id="tab-charts">
+        <div class="charts-section">
+            <div class="chart-container">
+                <div id="tradingview-widget" style="height:300px"></div>
+            </div>
+            <div style="padding:12px;display:flex;gap:8px;flex-wrap:wrap">
+                <div class="rate-card" id="rateBinance">Binance: --</div>
+                <div class="rate-card" id="rateBybit">Bybit: --</div>
+                <div class="rate-card" id="rateP2P">P2P Avg: 92.50 RUB</div>
+            </div>
+            <div class="commission-info" id="commissionInfo"></div>
+        </div>
     </div>
 
     <div class="tab-content" id="tab-deals">

@@ -101,6 +101,24 @@ body {
 }
 .btn-float:hover { background: #2ea043; }
 
+.btn-connect {
+    background: #1f6feb; color: #fff; border: none; border-radius: 8px;
+    padding: 6px 12px; font-size: 11px; cursor: pointer; margin-left: 8px;
+    font-weight: 600; transition: background 0.2s;
+}
+.btn-connect:hover { background: #58a6ff; }
+.btn-connect.connected { background: #238636; }
+
+.chart-container { background: #161b22; border: 1px solid #21262d; border-radius: 12px; overflow: hidden; margin-bottom: 8px; }
+
+.rate-card {
+    flex: 1; min-width: 100px; background: #161b22; border: 1px solid #21262d;
+    border-radius: 8px; padding: 8px 12px; font-size: 11px; color: #c9d1d9;
+    text-align: center;
+}
+
+.commission-info { margin-top: 8px; }
+
 @media (max-width: 400px) {
     .tab { font-size: 10px; padding: 10px 4px; }
     .offer-card .amount { font-size: 16px; }

@@ -340,3 +340,117 @@ function initButtons() {
     fab.onclick = () => document.getElementById('createOfferModal').classList.add('active');
     document.body.appendChild(fab);
 }
+
+// ========== CHARTS & TRADINGVIEW ==========
+function initCharts() {
+    if (typeof TradingView === 'undefined') {
+        document.getElementById('tradingview-widget').innerHTML =
+            '<div style="height:300px;display:flex;align-items:center;justify-content:center;color:#8b949e">Chart loading...</div>';
+        return;
+    }
+    new TradingView.widget({
+        container_id: "tradingview-widget",
+        width: "100%",
+        height: 300,
+        symbol: "BINANCE:USDTUSDC",
+        interval: "60",
+        timezone: "Europe/Moscow",
+        theme: "dark",
+        style: "1",
+        locale: "ru",
+        toolbar_bg: "#161b22",
+        enable_publishing: false,
+        hide_side_toolbar: true,
+        allow_symbol_change: false,
+    });
+}
+
+// ========== LIVE RATES ==========
+async function loadRates() {
+    try {
+        const data = await api('/rates');
+        if (!data) return;
+        document.getElementById('rateBinance').textContent =
+            'Binance: ' + (data.sources?.find(s => s.exchange === 'Binance')?.rate || '--');
+        document.getElementById('rateBybit').textContent =
+            'Bybit: ' + (data.sources?.find(s => s.exchange === 'Bybit')?.rate || '--');
+        document.getElementById('rateDisplay').textContent =
+            '1 USDT = ' + (data.usdtRub || '92.50') + ' RUB';
+    } catch {}
+}
+
+// ========== TON CONNECT TRANSFER ==========
+async function sendTONviaTonkeeper(amount, dealId) {
+    if (!connectedWallet) {
+        toast('Connect TON wallet first');
+        return null;
+    }
+    const transfer = await api('/ton/transfer', 'POST', {
+        sender: connectedWallet,
+        amount: parseFloat(amount),
+        dealId: dealId,
+    });
+    if (!transfer) return null;
+
+    if (tonConnect) {
+        try {
+            const tx = {
+                validUntil: Math.floor(Date.now() / 1000) + 300,
+                messages: [{
+                    address: transfer.recipient,
+                    amount: transfer.amount,
+                    payload: transfer.payload?.forwardPayload || '',
+                }],
+            };
+            const result = await tonConnect.sendTransaction(tx);
+            return result;
+        } catch (e) {
+            console.error('TON tx error:', e);
+        }
+    }
+
+    window.open(transfer.signedUrl, '_blank');
+    return transfer;
+}
+
+// ========== COMMISSION INFO ==========
+async function loadCommissionInfo() {
+    const data = await api('/commission');
+    if (!data) return;
+    document.getElementById('commissionInfo').innerHTML =
+        '<div style="padding:12px;background:#161b22;border:1px solid #21262d;border-radius:8px;margin-top:8px;font-size:12px;color:#8b949e">' +
+        'Fee: ' + data.effectiveFee + '% | ' +
+        'Volume 30d: ' + (data.totalVolume30d || 0).toFixed(2) + ' USDT | ' +
+        'Platform: ' + (data.platformWallet || '').slice(0, 8) + '...' +
+        '</div>';
+}
+
+// ========== WEBSOCKET ==========
+let ws = null;
+function connectWebSocket(uid) {
+    try {
+        ws = new WebSocket('wss://p2p-exchange-api.vercel.app/ws?user_id=' + (uid || 'anon'));
+        ws.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            if (msg.event === 'deal_update' || msg.event === 'new_offer') {
+                loadMyDeals();
+                loadBuyOffers();
+                loadSellOffers();
+            }
+        };
+        ws.onclose = () => setTimeout(() => connectWebSocket(uid), 5000);
+    } catch {}
+}
+
+// Update init buttons to include charts
+document.addEventListener('DOMContentLoaded', () => {
+    const orig = initButtons;
+    initButtons = function() {
+        orig();
+        initCharts();
+        loadRates();
+        loadCommissionInfo();
+        setInterval(loadRates, 30000);
+        if (currentUser) connectWebSocket(currentUser.id);
+    };
+});

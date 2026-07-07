@@ -2,7 +2,8 @@ const { pool, migrate } = require("../lib/db");
 const { validateInitData } = require("../lib/auth");
 const { escrowCreate, escrowLock, escrowMarkPaid, escrowRelease, escrowOpenDispute, escrowAdminResolve, STATUS } = require("../lib/escrow");
 const { processTimeouts } = require("../lib/workers/timeout");
-const { GUARANTOR_WALLET } = require("../lib/ton");
+const { GUARANTOR, getExchangeRate, createTransferRequest, verifyDeposit } = require("../lib/ton-tx");
+const { calculateFee, calculateVolumeDiscount, processCommission } = require("../lib/commission");
 
 let migrated = false;
 
@@ -60,19 +61,47 @@ module.exports = async (req, res) => {
 
   // Public endpoints
   if (path === "/health") {
-    return json(res, { status: "ok", db: true, guarantor: GUARANTOR_WALLET.slice(0, 10) + "...", version: "2.0-secure" });
+    return json(res, { status: "ok", db: true, guarantor: GUARANTOR.slice(0, 10) + "...", version: "3.0-full" });
+  }
+
+  if (path === "/rates") {
+    const rates = await getExchangeRate();
+    return json(res, rates);
   }
 
   if (path === "/stats") {
     const { rows: v } = await pool.query("SELECT COALESCE(SUM(volume_rub),0) as v24, COALESCE(SUM(deals_count),0) as d24 FROM stats WHERE date >= CURRENT_DATE - 7");
     const { rows: td } = await pool.query("SELECT COUNT(*)::int as c FROM deals WHERE status = 'released'");
     const { rows: au } = await pool.query("SELECT COUNT(*)::int as c FROM users WHERE created_at >= NOW() - INTERVAL '7 days'");
-    return json(res, { volume24h: v[0]?.v24 || 0, deals24h: v[0]?.d24 || 0, totalDeals: td[0]?.c || 0, activeUsers: au[0]?.c || 0, guarantor: GUARANTOR_WALLET });
+    return json(res, { volume24h: v[0]?.v24 || 0, deals24h: v[0]?.d24 || 0, totalDeals: td[0]?.c || 0, activeUsers: au[0]?.c || 0, guarantor: GUARANTOR });
   }
 
   if (path === "/cron/process-timeouts") {
     const result = await processTimeouts();
     return json(res, result);
+  }
+
+  // POST /api/ton/transfer — generate transfer payload for client signing
+  if (path === "/ton/transfer" && req.method === "POST") {
+    const { sender, amount, dealId } = req.body || {};
+    if (!amount) return json(res, { error: "amount required" }, 400);
+    const transfer = await createTransferRequest(sender || "", GUARANTOR, amount, dealId || "manual");
+    return json(res, transfer);
+  }
+
+  // POST /api/ton/verify — verify a deposit
+  if (path === "/ton/verify" && req.method === "POST") {
+    const { amount, from, dealId } = req.body || {};
+    const result = await verifyDeposit(amount || 0, from || "", dealId || "");
+    return json(res, result);
+  }
+
+  // GET /api/commission
+  if (path === "/commission") {
+    const { rows: vol } = await pool.query("SELECT COALESCE(SUM(amount_usdt),0) as v FROM commissions WHERE created_at >= NOW() - INTERVAL '30 days'");
+    const info = calculateFee(100);
+    const discount = calculateVolumeDiscount(vol[0]?.v || 0);
+    return json(res, { defaultFeePercent: info.feePercent, volumeDiscount: discount, effectiveFee: discount, platformWallet: GUARANTOR, totalVolume30d: vol[0]?.v || 0 });
   }
 
   // Auth
