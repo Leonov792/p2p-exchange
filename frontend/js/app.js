@@ -73,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function api(path, method = 'GET', body = null) {
     const headers = { 'Content-Type': 'application/json' };
     if (currentUser) headers['X-Telegram-User-ID'] = currentUser.id;
+    if (tg && tg.initData) headers['X-Telegram-InitData'] = tg.initData;
     const opts = { method, headers };
     if (body) opts.body = JSON.stringify(body);
     try {
