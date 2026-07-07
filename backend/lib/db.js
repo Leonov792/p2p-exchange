@@ -117,6 +117,22 @@ async function migrate() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS referrals (
+      id SERIAL PRIMARY KEY, referrer_id BIGINT REFERENCES users(id),
+      referred_id BIGINT UNIQUE REFERENCES users(id),
+      status TEXT DEFAULT 'active', created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS referral_commissions (
+      id SERIAL PRIMARY KEY, deal_id UUID REFERENCES deals(id),
+      referrer_id BIGINT REFERENCES users(id), referred_id BIGINT REFERENCES users(id),
+      amount_usdt DECIMAL(20,6) NOT NULL, rate DECIMAL(5,4) DEFAULT 0.005,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   const cols = [
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS payment_deadline TIMESTAMP",
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS confirm_deadline TIMESTAMP",
@@ -124,6 +140,8 @@ async function migrate() {
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS trust_score INTEGER DEFAULT 0",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_maker BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_earnings DECIMAL(20,6) DEFAULT 0",
   ];
   for (const q of cols) {
     await pool.query(q).catch(() => {});

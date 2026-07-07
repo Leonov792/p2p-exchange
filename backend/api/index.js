@@ -9,6 +9,7 @@ const { computeTrustScore, checkDealLimits } = require("../lib/scoring");
 const { bindCard, verifyCardForDispute, getUserCards } = require("../lib/cards");
 const { createWeb3Escrow, releaseWeb3Escrow, checkEscrowStatus } = require("../lib/escrow-web3");
 const { checkAMLScore, blacklistWallet } = require("../lib/aml");
+const { processReferral, creditReferralCommission, getReferralStats } = require("../lib/referrals");
 
 let migrated = false;
 
@@ -112,14 +113,18 @@ module.exports = async (req, res) => {
   // Auth
   if (path === "/auth") {
     const body = req.body || {};
+    const referrerId = parseInt(String(body.referrer_id || body.start_param || "0"), 10);
+
     if (body.initData) {
       const v = validateInitData(body.initData);
       if (!v.valid) return json(res, { error: v.error }, 401);
       await pool.query("INSERT INTO users (id, username) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET username=$2", [v.user.id, v.user.username || ""]);
+      if (referrerId > 0 && referrerId !== v.user.id) await processReferral(v.user.id, referrerId);
       return json(res, { success: true, user: v.user });
     }
     if (!body.id) return json(res, { error: "id required" }, 400);
     await pool.query("INSERT INTO users (id, username) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET username=$2", [body.id, body.username || ""]);
+    if (referrerId > 0 && referrerId !== body.id) await processReferral(body.id, referrerId);
     return json(res, { success: true });
   }
 
@@ -353,6 +358,12 @@ module.exports = async (req, res) => {
       const { deal_id, to_buyer } = req.body || {};
       try { const result = await releaseWeb3Escrow(deal_id, uid, to_buyer); return json(res, result); }
       catch (e) { return json(res, { error: e.message }, e.statusCode || 500); }
+    }
+
+    // GET /api/referrals
+    if (path === "/referrals" && req.method === "GET") {
+      const stats = await getReferralStats(uid);
+      return json(res, stats);
     }
 
     json(res, { status: "ok" });
