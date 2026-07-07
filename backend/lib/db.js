@@ -160,6 +160,7 @@ async function migrate() {
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_earnings DECIMAL(20,6) DEFAULT 0",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS balance DECIMAL(20,6) DEFAULT 0",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_frozen DECIMAL(20,6) DEFAULT 0",
+    "ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS deal_id UUID",
   ];
   for (const q of cols) {
     await pool.query(q).catch(() => {});

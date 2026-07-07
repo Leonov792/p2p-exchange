@@ -2,6 +2,7 @@ const { pool } = require("./db");
 const { freezeBalance, unfreezeBalance, transferBalance } = require("./balance");
 const { calculateCommission } = require("./ton-real");
 const { creditReferralCommission } = require("./referrals");
+const { autoReleaseAfterDeal } = require("./workers/withdraw");
 
 const STATUS = {
   CREATED: "created",
@@ -190,8 +191,14 @@ async function escrowRelease(dealId, sellerId) {
     // Credit referral commissions
     await creditReferralCommission(dealId, deal.buyer_id, deal.seller_id, deal.amount_usdt);
 
+    // Auto-withdraw to buyer's wallet
+    const buyer = (await client.query("SELECT ton_wallet FROM users WHERE id = $1", [deal.buyer_id])).rows[0];
+    if (buyer?.ton_wallet) {
+      await autoReleaseAfterDeal(dealId, buyerGets, buyer.ton_wallet);
+    }
+
     await client.query("COMMIT");
-    return { ...deal, status: STATUS.RELEASED, commission: commission.fee, buyerReceived: buyerGets };
+    return { ...deal, status: STATUS.RELEASED, commission: commission.fee, buyerReceived: buyerGets, autoWithdraw: !!buyer?.ton_wallet };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

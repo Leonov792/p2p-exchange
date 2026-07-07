@@ -1,70 +1,52 @@
-// Escrow Smart Contract — Full Deployment Pipeline
+// Smart Contract Deploy Pipeline — TON Mainnet
 // ==================================================
-// Prerequisites: Node.js 18+, @ton/ton, @ton/crypto
-// Install: npm install @ton/ton @ton/crypto @ton/blueprint
-//
-// Compile: npx func-js contract/escrow.fc --boc escrow.cell
-// Deploy:  npx blueprint run
+// Prerequisites: Node.js, @ton/ton, @ton/crypto, func compiler
+// Install: npm i -g @ton/ton @ton/crypto @ton/blueprint
 
-const fs = require("fs");
-const path = require("path");
-
-const CONTRACT_PATH = path.join(__dirname, "escrow.fc");
-const COMPILED_PATH = path.join(__dirname, "escrow.cell");
-
-// Configuration
-const CONFIG = {
-    network: process.env.TON_NETWORK || "testnet",  // testnet | mainnet
-    guarantorWallet: "UQAAECd3lxgQEr9wEV_xaYpyg_it7Vj0ysLjFe6ayXPUHHFp",
-    endpoints: {
-        testnet: "https://testnet.toncenter.com/api/v2/jsonRPC",
-        mainnet: "https://toncenter.com/api/v2/jsonRPC",
-    },
-};
+const CONTRACT_PATH = "contract/escrow.fc";
+const MAINNET_ENDPOINT = "https://toncenter.com/api/v2/jsonRPC";
+const GUARANTOR = "UQAAECd3lxgQEr9wEV_xaYpyg_it7Vj0ysLjFe6ayXPUHHFp";
 
 async function compile() {
-    console.log("Compiling escrow.fc...");
-    console.log("Run: npx func-js " + CONTRACT_PATH + " --boc " + COMPILED_PATH);
-    console.log("Then deploy using Blueprint or toncli");
+  console.log("Compiling escrow.fc to BOC...");
+  console.log("func -SPA -o escrow.cell " + CONTRACT_PATH);
+  console.log("If func not installed: npm i -g @ton-community/func-js");
 }
 
-async function deploy(sellerWallet, buyerWallet, dealId) {
-    console.log("Deploying escrow contract for deal:", dealId);
-    console.log("  Network:", CONFIG.network);
-    console.log("  Seller:", sellerWallet);
-    console.log("  Buyer:", buyerWallet);
-    console.log("  Guarantor:", CONFIG.guarantorWallet);
-
-    const initData = {
-        seller: sellerWallet,
-        buyer: buyerWallet,
-        guarantor: CONFIG.guarantorWallet,
-        dealId: dealId,
-    };
-
-    console.log("  Init data:", JSON.stringify(initData, null, 2));
-    console.log("");
-    console.log("To deploy on mainnet:");
-    console.log("  1. Set TON_NETWORK=mainnet");
-    console.log("  2. Ensure wallet has > 0.05 TON for fees");
-    console.log("  3. Run: npx blueprint run contract/deploy.js");
+async function deployMainnet(sellerWallet, buyerWallet, dealId) {
+  console.log("\n=== TON MAINNET DEPLOY ===");
+  console.log("Network: mainnet");
+  console.log("Guarantor:", GUARANTOR);
+  console.log("Seller:", sellerWallet);
+  console.log("Buyer:", buyerWallet);
+  console.log("Deal ID:", dealId);
+  console.log("\nSteps:");
+  console.log("1. Ensure wallet has > 0.05 TON for fees");
+  console.log("2. Run: npx blueprint run");
+  console.log("3. Contract address will be logged");
+  console.log("4. Monitor on: https://tonscan.org/");
+  console.log("\nDeploy cost: ~0.05 TON ($0.30)");
+  console.log("Contract methods:");
+  console.log("  lock(seller, buyer, amount)   — freeze USDT");
+  console.log("  release()                     — send to buyer (guarantor only)");
+  console.log("  refund()                      — return to seller (guarantor or timeout)");
+  console.log("  get_wallet_data()              — view escrow state");
 }
 
-// CLI
+async function deployTestnet(sellerWallet, buyerWallet, dealId) {
+  console.log("\n=== TON TESTNET DEPLOY (FREE) ===");
+  console.log("Network: testnet");
+  console.log("Use testnet.toncenter.com for verification");
+  console.log("Get test TON from: https://t.me/testgiver_ton_bot");
+}
+
 if (require.main === module) {
-    const args = process.argv.slice(2);
-    const cmd = args[0] || "compile";
-
-    if (cmd === "compile") {
-        compile();
-    } else if (cmd === "deploy") {
-        const seller = args[1] || "UQ...";
-        const buyer = args[2] || "UQ...";
-        const dealId = args[3] || "test-deal-001";
-        deploy(seller, buyer, dealId);
-    } else {
-        console.log("Usage: node deploy.js [compile|deploy] [seller] [buyer] [dealId]");
-    }
+  const args = process.argv.slice(2);
+  const cmd = args[0] || "compile";
+  if (cmd === "compile") compile();
+  else if (cmd === "mainnet") deployMainnet(args[1] || "UQ...", args[2] || "UQ...", args[3] || "deal-001");
+  else if (cmd === "testnet") deployTestnet(args[1] || "UQ...", args[2] || "UQ...", args[3] || "deal-001");
+  else console.log("Usage: node deploy.js [compile|mainnet|testnet] [seller] [buyer] [dealId]");
 }
 
-module.exports = { compile, deploy, CONFIG };
+module.exports = { compile, deployMainnet, deployTestnet };

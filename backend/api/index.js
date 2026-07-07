@@ -11,6 +11,7 @@ const { createWeb3Escrow, releaseWeb3Escrow, checkEscrowStatus } = require("../l
 const { checkAMLScore, blacklistWallet } = require("../lib/aml");
 const { processReferral, creditReferralCommission, getReferralStats } = require("../lib/referrals");
 const { GUARANTOR, createTransferPayload, verifyIncomingPayment, getBalance, getExchangeRateTON, calculateCommission } = require("../lib/ton-real");
+const { processWithdrawals, buildTONTransferPayload } = require("../lib/workers/withdraw");
 const { depositUSDT, requestWithdrawal, getDepositHistory, getWithdrawalHistory } = require("../lib/wallet");
 const { freezeBalance, unfreezeBalance, getBalances } = require("../lib/balance");
 
@@ -90,12 +91,23 @@ module.exports = async (req, res) => {
     return json(res, result);
   }
 
+  if (path === "/cron/process-withdrawals") {
+    const result = await processWithdrawals();
+    return json(res, result);
+  }
+
   // POST /api/ton/transfer — REAL transfer payload for TON Connect signing
   if (path === "/ton/transfer" && req.method === "POST") {
     const { sender, amount, dealId } = req.body || {};
     if (!amount) return json(res, { error: "amount required" }, 400);
     const transfer = await createTransferPayload(sender || "", amount, dealId || "");
-    return json(res, transfer);
+    const deepLink = buildTONTransferPayload(GUARANTOR, amount, dealId || Date.now());
+    return json(res, { 
+      ...transfer, 
+      deepLink: deepLink.signedUrl,
+      returnUrl: `https://p2p-exchange-sigma.vercel.app?tx=done&deal=${dealId}`,
+      instructions: "1. Open link in your TON wallet. 2. Confirm the transfer. 3. Return to this page and press Lock."
+    });
   }
 
   // POST /api/ton/verify — verify a REAL payment on blockchain

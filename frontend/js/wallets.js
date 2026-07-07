@@ -149,12 +149,19 @@
 
         if (connected.chain === 'ton') {
             const transfer = await apiCall('/ton/transfer', 'POST', { sender: connected.address, amount, dealId });
-            if (transfer?.signedUrl) {
-                window.open(transfer.signedUrl, '_blank');
-                toast('Confirm transaction in your wallet. Then return.');
-                return { success: true, txHash: 'pending_' + Date.now(), signedUrl: transfer.signedUrl };
+            if (transfer?.deepLink) {
+                showTxProgress('Opening TON wallet... Confirm the transfer, then return.');
+                window.location.href = transfer.deepLink;
+                
+                return { 
+                    success: true, 
+                    txHash: 'pending_' + Date.now(), 
+                    signedUrl: transfer.deepLink,
+                    returnUrl: transfer.returnUrl,
+                    instructions: transfer.instructions 
+                };
             }
-            toast('Transfer failed. Check wallet address.');
+            toast('Transfer generation failed.');
             return null;
         }
 
@@ -164,17 +171,38 @@
                 const to = '0x0000000000000000000000000000000000000000';
                 const valueHex = '0x' + Math.floor(amount * 1e6).toString(16);
                 const data = '0xa9059cbb' + to.slice(2).padStart(64,'0') + valueHex.slice(2).padStart(64,'0');
+                
+                showTxProgress('Confirm in MetaMask...');
                 const txHash = await window.ethereum.request({
                     method: 'eth_sendTransaction',
                     params: [{ from: connected.address, to: USDT, data, gas: '0x186A0' }],
                 });
+                hideTxProgress();
                 return { success: true, txHash };
-            } catch(e) { toast('Transaction rejected.'); return null; }
+            } catch(e) { 
+                hideTxProgress();
+                toast('Transaction rejected.'); 
+                return null; 
+            }
         }
 
         toast('Manual transfer: send ' + amount + ' USDT to guarantor wallet.');
         return null;
     };
 
+    function showTxProgress(msg) {
+        const el = document.getElementById('txProgress');
+        const txt = document.getElementById('txProgressText');
+        if (el) el.style.display = 'block';
+        if (txt) txt.textContent = msg || 'Sending USDT...';
+    }
+
+    function hideTxProgress() {
+        const el = document.getElementById('txProgress');
+        if (el) el.style.display = 'none';
+    }
+
     window._connectedWallet = function() { return connected; };
+    window._showTxProgress = showTxProgress;
+    window._hideTxProgress = hideTxProgress;
 })();
