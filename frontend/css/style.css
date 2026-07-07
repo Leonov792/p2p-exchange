@@ -119,6 +119,10 @@ body {
 
 .commission-info { margin-top: 8px; }
 
+.warning-badge { background: #d29922; color: #0d1117; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; margin: 3px 0; display: inline-block; }
+.ok-badge { background: #238636; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; margin: 3px 0; display: inline-block; }
+.info-badge { background: #1f6feb; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; margin: 3px 0; display: inline-block; }
+
 @media (max-width: 400px) {
     .tab { font-size: 10px; padding: 10px 4px; }
     .offer-card .amount { font-size: 16px; }

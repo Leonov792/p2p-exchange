@@ -284,15 +284,37 @@ async function disputeDeal(dealId) {
 async function loadProfile() {
     const data = await api('/profile');
     if (!data) return;
+
+    const scoring = await api('/scoring');
+    const bonds = await api('/bonds/status');
+    const cards = await api('/cards');
+
+    const limitsHtml = scoring?.limits?.quarantine
+        ? '<div class="warning-badge">QUARANTINE: max ' + scoring.limits.maxDealUsdt + ' USDT/deal</div>'
+        : '<div class="ok-badge">Level: ' + (scoring?.limits?.level || 'Standard') + '</div>';
+
+    const bondHtml = bonds?.isMaker
+        ? '<div class="ok-badge">Maker: ' + bonds.bondAmount + ' USDT bonded</div>'
+        : '<div class="info-badge">Not a maker. Bond: ' + (bonds?.requiredBond || 500) + ' USDT required</div>';
+
+    const cardsHtml = cards && cards.length > 0
+        ? '<div class="ok-badge">' + cards.length + ' card(s) bound</div>'
+        : '<div class="info-badge">No cards bound</div>';
+
     document.getElementById('profileSection').innerHTML = `
         <div class="profile-section">
             <h3 style="margin-bottom:12px">${data.username || 'User #' + data.id}</h3>
             <div class="stats-row">
                 <div class="profile-stat"><div class="value">${data.deals_completed || 0}</div><div class="label">Deals</div></div>
+                <div class="profile-stat"><div class="value">${data.trust_score || 0}</div><div class="label">Trust</div></div>
                 <div class="profile-stat"><div class="value">${data.rating || 0}</div><div class="label">Rating</div></div>
-                <div class="profile-stat"><div class="value">${data.deals_cancelled || 0}</div><div class="label">Cancelled</div></div>
             </div>
-            <div class="wallet-label">Your TON Wallet</div>
+            <div style="margin-top:12px;font-size:11px;text-align:left;padding:0 8px">
+                ${limitsHtml}
+                ${bondHtml}
+                ${cardsHtml}
+            </div>
+            <div class="wallet-label" style="margin-top:12px">Your TON Wallet</div>
             <input class="wallet-input" id="walletInput" value="${data.ton_wallet || ''}" placeholder="Enter your TON wallet address...">
             <button class="btn-primary" onclick="saveWallet()" style="width:100%">Save Wallet</button>
             <button class="btn-primary" onclick="document.getElementById('createOfferModal').classList.add('active')" style="width:100%;margin-top:8px;background:#1f6feb">Create Offer</button>

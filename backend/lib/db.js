@@ -76,11 +76,54 @@ async function migrate() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS maker_bonds (
+      id SERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(id),
+      amount DECIMAL(20,6) NOT NULL DEFAULT 500, status TEXT DEFAULT 'active',
+      locked_until TIMESTAMP, released_at TIMESTAMP,
+      confiscated_amount DECIMAL(20,6) DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS confiscations (
+      id SERIAL PRIMARY KEY, bond_id INTEGER REFERENCES maker_bonds(id),
+      maker_id BIGINT REFERENCES users(id), victim_id BIGINT REFERENCES users(id),
+      deal_id UUID, amount DECIMAL(20,6) NOT NULL, reason TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS card_hashes (
+      id SERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(id),
+      card_hash TEXT NOT NULL, masked_card TEXT,
+      last_used TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS web3_escrows (
+      id SERIAL PRIMARY KEY, deal_id UUID UNIQUE REFERENCES deals(id),
+      seller_address TEXT, buyer_address TEXT, contract_address TEXT,
+      amount_usdt DECIMAL(20,6) NOT NULL, network TEXT DEFAULT 'mainnet',
+      status TEXT DEFAULT 'awaiting_deposit', resolved_by BIGINT,
+      resolved_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS aml_checks (
+      id SERIAL PRIMARY KEY, wallet_address TEXT NOT NULL,
+      amount_usdt DECIMAL(20,6) DEFAULT 0, risk_score INTEGER DEFAULT 0,
+      flags JSONB DEFAULT '[]', created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   const cols = [
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS payment_deadline TIMESTAMP",
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS confirm_deadline TIMESTAMP",
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS locked_at TIMESTAMP",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS trust_score INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_maker BOOLEAN DEFAULT FALSE",
   ];
   for (const q of cols) {
     await pool.query(q).catch(() => {});

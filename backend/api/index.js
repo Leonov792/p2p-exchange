@@ -4,6 +4,11 @@ const { escrowCreate, escrowLock, escrowMarkPaid, escrowRelease, escrowOpenDispu
 const { processTimeouts } = require("../lib/workers/timeout");
 const { GUARANTOR, getExchangeRate, createTransferRequest, verifyDeposit } = require("../lib/ton-tx");
 const { calculateFee, calculateVolumeDiscount, processCommission } = require("../lib/commission");
+const { lockBond, unlockBond, confiscateBond, getMakerStatus } = require("../lib/bonds");
+const { computeTrustScore, checkDealLimits } = require("../lib/scoring");
+const { bindCard, verifyCardForDispute, getUserCards } = require("../lib/cards");
+const { createWeb3Escrow, releaseWeb3Escrow, checkEscrowStatus } = require("../lib/escrow-web3");
+const { checkAMLScore, blacklistWallet } = require("../lib/aml");
 
 let migrated = false;
 
@@ -267,6 +272,87 @@ module.exports = async (req, res) => {
     // GET /api/stars/balance
     if (path === "/stars/balance") {
       return json(res, { balance: 0 });
+    }
+
+    // ========== SECURITY: Bonds ==========
+    if (path === "/bonds/status") {
+      const status = await getMakerStatus(uid);
+      return json(res, status);
+    }
+    if (path === "/bonds/lock" && req.method === "POST") {
+      try { const bond = await lockBond(uid, req.body?.amount || 500); return json(res, bond); }
+      catch (e) { return json(res, { error: e.message }, e.statusCode || 500); }
+    }
+    if (path === "/bonds/unlock" && req.method === "POST") {
+      try { const result = await unlockBond(uid); return json(res, result); }
+      catch (e) { return json(res, { error: e.message }, e.statusCode || 500); }
+    }
+
+    // ========== SECURITY: Scoring ==========
+    if (path === "/scoring") {
+      const initData = req.headers["x-telegram-initdata"] || "";
+      const params = new URLSearchParams(initData);
+      const user = params.get("user");
+      let tgAge = 365, hasUsername = true, hasPremium = false;
+      if (user) {
+        try { const u = JSON.parse(user); tgAge = Math.floor((Date.now() / 1000 - (u.id >> 32)) / 86400); hasUsername = !!u.username; hasPremium = !!u.is_premium; } catch {}
+      }
+      const score = await computeTrustScore(uid, tgAge, hasUsername, hasPremium);
+      return json(res, score);
+    }
+    if (path === "/scoring/check-deal" && req.method === "POST") {
+      const result = await checkDealLimits(uid, req.body?.amount_usdt || 0);
+      return json(res, result);
+    }
+
+    // ========== SECURITY: Cards ==========
+    if (path === "/cards/bind" && req.method === "POST") {
+      try { const result = await bindCard(uid, req.body?.first6, req.body?.last4); return json(res, result); }
+      catch (e) { return json(res, { error: e.message }, e.statusCode || 500); }
+    }
+    if (path === "/cards/verify" && req.method === "POST") {
+      const result = await verifyCardForDispute(uid, req.body?.first6, req.body?.last4);
+      return json(res, result);
+    }
+    if (path === "/cards") {
+      const cards = await getUserCards(uid);
+      return json(res, cards);
+    }
+
+    // ========== SECURITY: Web3 Escrow ==========
+    if (path === "/escrow-web3/create" && req.method === "POST") {
+      const { deal_id, seller_address, buyer_address, amount_usdt } = req.body || {};
+      try { const result = await createWeb3Escrow(deal_id, seller_address || "", buyer_address || "", amount_usdt || 0); return json(res, result); }
+      catch (e) { return json(res, { error: e.message }, e.statusCode || 500); }
+    }
+    if (path === "/escrow-web3/status" && req.method === "GET") {
+      const status = await checkEscrowStatus(req.body?.deal_id || parts[2] || "");
+      return json(res, status);
+    }
+
+    // ========== SECURITY: AML ==========
+    if (path === "/aml/check" && req.method === "POST") {
+      const { wallet, amount } = req.body || {};
+      const result = await checkAMLScore(wallet || "", amount || 0);
+      return json(res, result);
+    }
+
+    // ========== ADMIN: Bonds confiscation ==========
+    if (path === "/admin/bonds/confiscate" && req.method === "POST") {
+      if (!ADMIN_IDS.includes(uid)) return json(res, { error: "Forbidden" }, 403);
+      try { const result = await confiscateBond(req.body?.maker_id, req.body?.victim_id, req.body?.deal_id, req.body?.reason || ""); return json(res, result); }
+      catch (e) { return json(res, { error: e.message }, e.statusCode || 500); }
+    }
+    if (path === "/admin/aml/blacklist" && req.method === "POST") {
+      if (!ADMIN_IDS.includes(uid)) return json(res, { error: "Forbidden" }, 403);
+      const result = await blacklistWallet(req.body?.wallet || "", req.body?.reason || "");
+      return json(res, result);
+    }
+    if (path === "/admin/bonds/resolve" && req.method === "POST") {
+      if (!ADMIN_IDS.includes(uid)) return json(res, { error: "Forbidden" }, 403);
+      const { deal_id, to_buyer } = req.body || {};
+      try { const result = await releaseWeb3Escrow(deal_id, uid, to_buyer); return json(res, result); }
+      catch (e) { return json(res, { error: e.message }, e.statusCode || 500); }
     }
 
     json(res, { status: "ok" });
