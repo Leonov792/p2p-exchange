@@ -1,4 +1,7 @@
 const { pool } = require("./db");
+const { freezeBalance, unfreezeBalance, transferBalance } = require("./balance");
+const { calculateCommission } = require("./ton-real");
+const { creditReferralCommission } = require("./referrals");
 
 const STATUS = {
   CREATED: "created",
@@ -37,10 +40,10 @@ async function escrowCreate(offerId, buyerId, sellerId, amountUsdt, totalRub, pa
     if (!offer) throw Object.assign(new Error("Offer not found"), { statusCode: 404 });
     if (offer.user_id === buyerId) throw Object.assign(new Error("Self-trade forbidden"), { statusCode: 400 });
 
-    await client.query(
-      "UPDATE users SET balance_frozen = balance_frozen + $1 WHERE id = $2",
-      [amountUsdt, sellerId]
-    );
+    sellerId = offer.user_id;
+
+    // Freeze seller's balance
+    await freezeBalance(client, sellerId, amountUsdt);
 
     const deal = (await client.query(
       `INSERT INTO deals (offer_id, buyer_id, seller_id, amount_usdt, total_rub, payment_method, status, payment_deadline)
@@ -52,6 +55,11 @@ async function escrowCreate(offerId, buyerId, sellerId, amountUsdt, totalRub, pa
     await client.query(
       "INSERT INTO deal_log (deal_id, from_status, to_status, actor_id) VALUES ($1, NULL, $2, $3)",
       [deal.id, STATUS.CREATED, buyerId]
+    );
+
+    await client.query(
+      "INSERT INTO stats (date, volume_rub, volume_usdt, deals_count) VALUES (CURRENT_DATE, $1, $2, 1) ON CONFLICT (date) DO UPDATE SET volume_rub = stats.volume_rub + $1, volume_usdt = stats.volume_usdt + $2, deals_count = stats.deals_count + 1",
+      [totalRub, amountUsdt]
     );
 
     await client.query("COMMIT");
@@ -152,13 +160,21 @@ async function escrowRelease(dealId, sellerId) {
       throw Object.assign(new Error("Deal must be PAID before release. Current: " + deal.status), { statusCode: 409 });
     }
 
+    const commission = calculateCommission(deal.amount_usdt);
+    const buyerGets = commission.sellerGets;
+
+    await unfreezeBalance(client, deal.seller_id, deal.amount_usdt);
+    await client.query("UPDATE users SET balance = balance - $1 WHERE id = $2", [deal.amount_usdt, deal.seller_id]);
+
+    const buyer = (await client.query("SELECT id FROM users WHERE id = $1", [deal.buyer_id])).rows[0];
+    if (!buyer) await client.query("INSERT INTO users (id) VALUES ($1) ON CONFLICT DO NOTHING", [deal.buyer_id]);
+    await client.query("UPDATE users SET balance = COALESCE(balance, 0) + $1 WHERE id = $2", [buyerGets, deal.buyer_id]);
+
+    await client.query("UPDATE users SET deals_completed = deals_completed + 1 WHERE id = $1 OR id = $2", [deal.buyer_id, deal.seller_id]);
+
     await client.query(
-      "UPDATE users SET balance_frozen = GREATEST(balance_frozen - $1, 0) WHERE id = $2",
-      [deal.amount_usdt, deal.seller_id]
-    );
-    await client.query(
-      "UPDATE users SET deals_completed = deals_completed + 1 WHERE id = $1 OR id = $2",
-      [deal.buyer_id, deal.seller_id]
+      "INSERT INTO commissions (deal_id, amount_usdt, fee_usdt, fee_percent) VALUES ($1,$2,$3,$4)",
+      [dealId, deal.amount_usdt, commission.fee, commission.percent]
     );
 
     await client.query(
@@ -171,8 +187,11 @@ async function escrowRelease(dealId, sellerId) {
       [dealId, deal.status, STATUS.RELEASED, sellerId]
     );
 
+    // Credit referral commissions
+    await creditReferralCommission(dealId, deal.buyer_id, deal.seller_id, deal.amount_usdt);
+
     await client.query("COMMIT");
-    return { ...deal, status: STATUS.RELEASED };
+    return { ...deal, status: STATUS.RELEASED, commission: commission.fee, buyerReceived: buyerGets };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

@@ -376,6 +376,49 @@ function copyReferralLink() {
     navigator.clipboard?.writeText(link).then(() => toast('Link copied!')).catch(() => toast(link));
 }
 
+// Wallet
+let walletOpen = false;
+document.addEventListener('click', (e) => {
+    if (e.target.id === 'balanceDisplay' && !walletOpen) { openWalletModal(); walletOpen = true; }
+});
+
+async function openWalletModal() {
+    document.getElementById('walletModal').classList.add('active');
+    document.getElementById('btnCloseWallet').onclick = () => { document.getElementById('walletModal').classList.remove('active'); walletOpen = false; };
+    await refreshBalance();
+
+    document.getElementById('btnDeposit').onclick = async () => {
+        const txHash = document.getElementById('walletTxHash').value.trim();
+        if (!txHash) { toast('Paste TX hash from your wallet'); return; }
+        toast('Verifying on blockchain...');
+        const r = await api('/wallet/deposit', 'POST', { tx_hash: txHash });
+        if (r?.deposited) { toast('Deposited: ' + r.amount + ' USDT!'); await refreshBalance(); }
+        else if (r?.status === 'pending') { toast(r.reason || 'Not found yet. Wait and try again.'); }
+        else { toast(r?.error || 'Deposit failed'); }
+    };
+
+    document.getElementById('btnWithdraw').onclick = async () => {
+        const amount = parseFloat(document.getElementById('walletAmount').value);
+        const wallet = document.getElementById('walletRecipient').value.trim();
+        if (!amount || amount <= 0) { toast('Enter amount'); return; }
+        if (!wallet) { toast('Enter recipient wallet address'); return; }
+        const r = await api('/wallet/withdraw', 'POST', { amount, wallet });
+        if (r?.withdrawn) { toast('Withdrawn: ' + amount + ' USDT'); await refreshBalance(); }
+        else { toast(r?.error || 'Withdraw failed'); }
+    };
+}
+
+async function refreshBalance() {
+    const r = await api('/wallet/balance');
+    if (r) {
+        document.getElementById('balanceDisplay').textContent = r.balance.toFixed(2) + ' USDT';
+        document.getElementById('walletBalance').textContent = r.balance.toFixed(2) + ' USDT';
+    }
+}
+
+// Auto-refresh balance
+setInterval(refreshBalance, 10000);
+
 // Charts & Live Rates
 if (typeof TradingView !== 'undefined') {
     new TradingView.widget({

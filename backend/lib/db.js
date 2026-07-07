@@ -133,6 +133,22 @@ async function migrate() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS deposits (
+      id SERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(id),
+      tx_hash TEXT UNIQUE, amount DECIMAL(20,6) DEFAULT 0,
+      status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS withdrawals (
+      id SERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(id),
+      recipient_wallet TEXT, amount DECIMAL(20,6) NOT NULL,
+      status TEXT DEFAULT 'pending', tx_hash TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
   const cols = [
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS payment_deadline TIMESTAMP",
     "ALTER TABLE deals ADD COLUMN IF NOT EXISTS confirm_deadline TIMESTAMP",
@@ -142,6 +158,8 @@ async function migrate() {
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_maker BOOLEAN DEFAULT FALSE",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus INTEGER DEFAULT 0",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_earnings DECIMAL(20,6) DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS balance DECIMAL(20,6) DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_frozen DECIMAL(20,6) DEFAULT 0",
   ];
   for (const q of cols) {
     await pool.query(q).catch(() => {});

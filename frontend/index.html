@@ -14,6 +14,7 @@
         <span class="logo">P2P Exchange</span>
         <div class="header-info">
             <span class="rate" id="rateDisplay">1 USDT = 92.50 RUB</span>
+            <span class="balance" id="balanceDisplay">0.00 USDT</span>
             <button class="btn-connect" id="btnConnectWallet">Connect TON</button>
         </div>
     </div>
@@ -129,6 +130,37 @@
     <div class="toast" id="toast"></div>
 
     <button class="btn-float" id="btnFloatCreate" title="Create offer">+</button>
+
+    <!-- Wallet Modal -->
+    <div class="modal" id="walletModal">
+        <div class="modal-content">
+            <h3>Wallet</h3>
+            <div id="walletBalance" style="text-align:center;margin-bottom:12px;font-size:24px;font-weight:700;color:#58a6ff">0.00 USDT</div>
+            <div class="form-group">
+                <label>Amount (USDT)</label>
+                <input type="number" id="walletAmount" class="input" placeholder="10" step="0.01" min="1">
+            </div>
+            <div class="form-group">
+                <label>TON Transaction Hash (for deposit)</label>
+                <input type="text" id="walletTxHash" class="input" placeholder="Paste TX hash after sending">
+            </div>
+            <div class="form-group">
+                <label>Recipient Wallet (for withdrawal)</label>
+                <input type="text" id="walletRecipient" class="input" placeholder="UQ...">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" id="btnDeposit" style="background:#238636">Deposit</button>
+                <button class="btn-primary" id="btnWithdraw" style="background:#1f6feb">Withdraw</button>
+            </div>
+            <div style="margin-top:12px;font-size:11px;color:#8b949e;text-align:center">
+                Guarantor: UQAAECd3lxgQEr9w...<br>
+                Send USDT to this wallet, paste TX hash, confirm deposit.
+            </div>
+            <div class="modal-actions" style="margin-top:8px">
+                <button class="btn-cancel" id="btnCloseWallet">Close</button>
+            </div>
+        </div>
+    </div>
 
     <script src="js/app.js"></script>
 </body>

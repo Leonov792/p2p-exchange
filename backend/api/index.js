@@ -11,6 +11,8 @@ const { createWeb3Escrow, releaseWeb3Escrow, checkEscrowStatus } = require("../l
 const { checkAMLScore, blacklistWallet } = require("../lib/aml");
 const { processReferral, creditReferralCommission, getReferralStats } = require("../lib/referrals");
 const { GUARANTOR, createTransferPayload, verifyIncomingPayment, getBalance, getExchangeRateTON, calculateCommission } = require("../lib/ton-real");
+const { depositUSDT, requestWithdrawal, getDepositHistory, getWithdrawalHistory } = require("../lib/wallet");
+const { freezeBalance, unfreezeBalance, getBalances } = require("../lib/balance");
 
 let migrated = false;
 
@@ -289,6 +291,40 @@ module.exports = async (req, res) => {
     // GET /api/stars/balance
     if (path === "/stars/balance") {
       return json(res, { balance: 0 });
+    }
+
+    // ========== WALLET: Deposit / Withdraw / Balance ==========
+    if (path === "/wallet/balance") {
+      const balances = await getBalances(uid);
+      return json(res, balances);
+    }
+
+    if (path === "/wallet/deposit" && req.method === "POST") {
+      try {
+        const result = await depositUSDT(uid, req.body?.tx_hash || "");
+        return json(res, result);
+      } catch (e) {
+        return json(res, { error: e.message }, e.statusCode || 500);
+      }
+    }
+
+    if (path === "/wallet/withdraw" && req.method === "POST") {
+      try {
+        const result = await requestWithdrawal(uid, req.body?.amount || 0, req.body?.wallet || "");
+        return json(res, result);
+      } catch (e) {
+        return json(res, { error: e.message }, e.statusCode || 500);
+      }
+    }
+
+    if (path === "/wallet/deposits") {
+      const history = await getDepositHistory(uid);
+      return json(res, history);
+    }
+
+    if (path === "/wallet/withdrawals") {
+      const history = await getWithdrawalHistory(uid);
+      return json(res, history);
     }
 
     // ========== SECURITY: Bonds ==========
