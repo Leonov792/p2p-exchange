@@ -1,9 +1,8 @@
 // Exchange v2 — Binance-clone trading integrated into P2P Mini App
-// API: https://backend-six-chi-80.vercel.app/api (Node.js)
+// Auth via app.js: getAuthHeaders()
 'use strict';
 
 const API_V2 = '/api';
-const API_LEGACY = '/api';
 
 function uid() {
     let id = localStorage.getItem('p2p_user_id');
@@ -11,13 +10,10 @@ function uid() {
     return id;
 }
 
+// Use unified auth from app.js
 function authHeaders() {
-    const headers = { 'Content-Type': 'application/json' };
-    const tg = window.Telegram && window.Telegram.WebApp;
-    if (tg && tg.initData) {
-        headers['X-Telegram-InitData'] = tg.initData;
-    }
-    // Also send user ID for backend identification
+    if (typeof getAuthHeaders === 'function') return getAuthHeaders();
+    var headers = { 'Content-Type': 'application/json' };
     headers['X-Telegram-User-Id'] = String(uid());
     return headers;
 }
@@ -154,13 +150,12 @@ async function placeSpotOrder() {
         const r = await fetch(`${API_V2}/v1/orders/place`, {
             method: 'POST', headers: authHeaders(), body: JSON.stringify(body)
         }).then(r => r.json());
+        if (r.error) { toast('Order: ' + r.error); return; }
         if (r.order_id) {
-            toast(`${side} order placed: ${r.order_id.slice(0,8)}`);
+            toast(`${side} ${currentSpotSymbol.replace('_','/')}: ${qty} @ ${price||'MKT'} — ${r.status}`);
             loadOrderBook();
-        } else {
-            toast('Error: ' + (r.error || 'unknown'));
         }
-    } catch(e) { toast('Order failed: ' + e.message); }
+    } catch(e) { toast('Order failed: network error'); }
 }
 
 function toggleSpotSide(side) {
@@ -213,13 +208,12 @@ async function openFuturesPosition() {
             method: 'POST', headers: authHeaders(),
             body: JSON.stringify({ symbol, side, quantity: qty, leverage, margin_type: 'ISOLATED', order_type: 'MARKET' })
         }).then(r => r.json());
-        if (r.id) {
-            toast(`${side} ${leverage}x opened`);
+        if (r.error) { toast('Futures: ' + r.error); return; }
+        if (r.position_id) {
+            toast(`${side} ${leverage}x ${symbol.replace('_PERP','')} qty=${qty} — OPENED`);
             loadFuturesPositions();
-        } else {
-            toast('Error: ' + (r.error || ''));
         }
-    } catch(e) { toast('Position failed'); }
+    } catch(e) { toast('Futures: network error'); }
 }
 
 async function closePosition(posId) {
@@ -228,11 +222,12 @@ async function closePosition(posId) {
             method: 'POST', headers: authHeaders(),
             body: JSON.stringify({ position_id: posId })
         }).then(r => r.json());
+        if (r.error) { toast('Close: ' + r.error); return; }
         if (r.success) {
-            toast('Closed! PnL: ' + parseFloat(r.realized_pnl||0).toFixed(4));
+            toast('Closed! PnL: ' + parseFloat(r.realized_pnl||0).toFixed(4) + ' USDT');
             loadFuturesPositions();
         }
-    } catch(e) {}
+    } catch(e) { toast('Close: network error'); }
 }
 
 function toggleFutSide(side) {

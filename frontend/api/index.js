@@ -351,7 +351,10 @@ const COLD_WALLET = "UQA_COLD_STORAGE_MULTISIG_PLACEHOLDER";
 const HOT_WALLET = "UQAAECd3lxgQEr9wEV_xaYpyg_it7Vj0ysLjFe6ayXPUHHFp";
 
 module.exports = async (req, res) => {
-  if (!migrated) { try { await migrate() } catch {}; migrated = true; }
+  if (!migrated) { try { await migrate(); } catch {}; migrated = true; }
+  // Fix deals constraint (missing values from older migrations)
+  try { await pool.query(`ALTER TABLE deals DROP CONSTRAINT IF EXISTS deals_status_check`); } catch(e) {}
+  try { await pool.query(`ALTER TABLE deals ADD CONSTRAINT deals_status_check CHECK (status = ANY (ARRAY['pending','created','locked','paid','completed','released','cancelled','disputed','timed_out']))`); } catch(e) {}
   if (req.method === "OPTIONS") return json(res, { ok: true });
 
   // IP rate limit for all requests

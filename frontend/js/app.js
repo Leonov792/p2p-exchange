@@ -1,9 +1,23 @@
 // P2P Exchange — Working Frontend
 // ============================================
 const API = '/api';
-const tg = window.Telegram?.WebApp;
 let currentUser = null;
 let currentTab = 'spot';
+
+// ========== UNIFIED AUTH ==========
+function getTG() { return window.Telegram?.WebApp; }
+
+function getAuthHeaders() {
+    var headers = { 'Content-Type': 'application/json' };
+    var tg = getTG();
+    if (tg && tg.initData) {
+        headers['X-Telegram-InitData'] = tg.initData;
+        headers['X-Telegram-User-Id'] = String(currentUser?.id || tg.initDataUnsafe?.user?.id || '');
+    } else if (currentUser) {
+        headers['X-Telegram-User-Id'] = String(currentUser.id);
+    }
+    return headers;
+}
 
 function toast(msg) {
     const t = document.getElementById('toast');
@@ -14,44 +28,38 @@ function toast(msg) {
 
 async function api(path, method, body) {
     method = method || 'GET';
-    var headers = { 'Content-Type': 'application/json' };
-    if (tg && tg.initData) {
-        headers['X-Telegram-InitData'] = tg.initData;
-    }
-    if (currentUser) {
-        headers['X-Telegram-User-Id'] = String(currentUser.id);
-    }
-    var opts = { method: method, headers: headers };
+    var opts = { method: method, headers: getAuthHeaders() };
     if (body) opts.body = JSON.stringify(body);
     try {
         var res = await fetch(API + path, opts);
         var data = await res.json();
-        if (!res.ok) { toast(data.error || 'Error ' + res.status); return null; }
+        if (!res.ok) { toast('API: ' + (data.error || res.status)); return null; }
         return data;
     } catch (e) {
         console.error('API:', e.message);
+        toast('Network error');
         return null;
     }
 }
 
 // ========== INIT ==========
 document.addEventListener('DOMContentLoaded', function() {
-    if (tg) { tg.ready(); tg.expand(); }
-    window._currentUser = currentUser;
+    var tg = getTG();
+    if (tg) { try { tg.ready(); tg.expand(); } catch(e) {} }
     initTabs();
     initAuth();
     initOfferForm();
-    // Don't load offers on start - exchange.js handles SPOT tab init
     loadLiveRates();
     setInterval(refreshData, 15000);
     setInterval(loadLiveRates, 30000);
 });
 
 async function initAuth() {
+    var tg = getTG();
     if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
         var u = tg.initDataUnsafe.user;
         currentUser = { id: u.id, username: u.username, first_name: u.first_name };
-        try { await api('/auth', 'POST', { id: u.id, username: u.username }); } catch(e) {}
+        try { await api('/auth', 'POST', { id: u.id, username: u.username || '' }); } catch(e) { toast('Auth error: ' + e.message); }
         toast(u.first_name || u.username || 'Connected');
     } else {
         var storedId = localStorage.getItem('p2p_user_id');
