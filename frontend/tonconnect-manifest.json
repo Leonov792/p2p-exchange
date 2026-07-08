@@ -3,5 +3,24 @@
   "name": "P2P Exchange",
   "iconUrl": "https://p2p-exchange-sigma.vercel.app/assets/icon.png",
   "termsOfUseUrl": "https://p2p-exchange-sigma.vercel.app/terms",
-  "privacyPolicyUrl": "https://p2p-exchange-sigma.vercel.app/privacy"
+  "privacyPolicyUrl": "https://p2p-exchange-sigma.vercel.app/privacy",
+  "bridge": [
+    {
+      "type": "sse",
+      "url": "https://bridge.tonapi.io/bridge"
+    }
+  ],
+  "platforms": ["ios", "android", "mac", "windows", "linux"],
+  "permissions": {
+    "ton": {
+      "sendTransaction": {
+        "description": "P2P Exchange needs to send TON transactions for escrow, deposits, and withdrawals"
+      }
+    }
+  },
+  "wallets": [
+    { "name": "Tonkeeper", "app_name": "tonkeeper", "image": "https://tonkeeper.com/assets/tonconnect-icon.png", "about_url": "https://tonkeeper.com", "universal_url": "https://app.tonkeeper.com/ton-connect", "bridge": [{ "type": "sse", "url": "https://bridge.tonapi.io/bridge" }] },
+    { "name": "Tonhub", "app_name": "tonhub", "image": "https://tonhub.com/tonconnect-icon.png", "about_url": "https://tonhub.com", "universal_url": "https://tonhub.com/ton-connect", "bridge": [{ "type": "sse", "url": "https://bridge.tonhub.com/bridge" }] },
+    { "name": "MyTonWallet", "app_name": "mytonwallet", "image": "https://mytonwallet.io/icon-256.png", "about_url": "https://mytonwallet.io", "universal_url": "https://connect.mytonwallet.org", "bridge": [{ "type": "sse", "url": "https://tonconnectbridge.mytonwallet.org/bridge" }] }
+  ]
 }
