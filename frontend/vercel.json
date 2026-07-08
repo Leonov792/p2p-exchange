@@ -8,6 +8,28 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" }
   ],
+  "crons": [
+    {
+      "path": "/api/v1/futures/cron/liquidations",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/v1/futures/cron/tpsl-check",
+      "schedule": "5 0 * * *"
+    },
+    {
+      "path": "/api/v1/futures/cron/funding",
+      "schedule": "10 0 * * *"
+    },
+    {
+      "path": "/api/cron/process-withdrawals",
+      "schedule": "15 0 * * *"
+    },
+    {
+      "path": "/api/cron/process-timeouts-p2p",
+      "schedule": "20 0 * * *"
+    }
+  ],
   "env": {
     "DATABASE_URL": "postgresql://neondb_owner:npg_q3zRB4hiGEsk@ep-calm-bar-atzg09ti.c-9.us-east-1.aws.neon.tech/neondb?sslmode=require",
     "BOT_TOKEN": "8650667280:AAE7NbQYdXbZg8SmY3WTv_rPXL4WCJ9YEWY"
