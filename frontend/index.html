@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>P2P Exchange</title>
     <link rel="stylesheet" href="css/style.css">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -10,374 +10,242 @@
     <script src="https://unpkg.com/lightweight-charts@4.1.4/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
-    <div class="header">
-        <span class="logo">P2P Exchange</span>
-        <div class="header-info">
-            <span class="rate" id="rateDisplay">1 USDT = 92.50 RUB</span>
-            <span class="balance" id="balanceDisplay">0.00 USDT</span>
-            <button class="btn-connect" id="btnConnectWallet">Connect Wallet</button>
+
+<!-- HEADER -->
+<header class="app-header">
+    <span class="header-logo">P2P Exchange</span>
+    <span class="header-balance"><span id="hdrBalance">0.00</span> USDT</span>
+    <div class="header-wallet not-connected" id="btnConnectWallet" onclick="toggleConnectModal()">
+        <span class="dot"></span><span class="addr">Connect Wallet</span>
+    </div>
+</header>
+
+<!-- PAIR STRIP -->
+<div class="pair-strip" id="pairStrip"></div>
+
+<!-- MAIN CONTENT -->
+<main class="app-content" id="appContent">
+
+<!-- ============ SPOT ============ -->
+<div class="tab-page active" id="tab-spot">
+    <div class="ticker-main" id="spotTickerMain">
+        <div class="flex items-center"><span class="ticker-price font-mono" id="spotLastPrice">--</span><span class="ticker-change" id="spotChange">--</span></div>
+        <div class="ticker-stats" id="spotTickerStats"></div>
+    </div>
+    <div style="padding:0 12px">
+        <div id="tvChart" style="width:100%;height:320px;border-radius:8px;overflow:hidden;margin:10px 0"></div>
+        <div class="flex gap-8" style="margin-bottom:8px">
+            <button class="btn btn-sm tf-pill active" onclick="switchTimeframe('1m',this)">1m</button>
+            <button class="btn btn-sm tf-pill" onclick="switchTimeframe('5m',this)">5m</button>
+            <button class="btn btn-sm tf-pill" onclick="switchTimeframe('15m',this)">15m</button>
+            <button class="btn btn-sm tf-pill" onclick="switchTimeframe('1h',this)">1H</button>
+            <button class="btn btn-sm tf-pill" onclick="switchTimeframe('4h',this)">4H</button>
+            <button class="btn btn-sm tf-pill" onclick="switchTimeframe('1d',this)">1D</button>
+            <button class="btn btn-sm tf-pill" onclick="switchTimeframe('1w',this)">1W</button>
         </div>
-    </div>
-
-    <div class="tabs">
-        <button class="tab active" data-tab="spot">SPOT</button>
-        <button class="tab" data-tab="futures">FUTURES</button>
-        <button class="tab" data-tab="options">OPTIONS</button>
-        <button class="tab" data-tab="buy">P2P</button>
-        <button class="tab" data-tab="deals">DEALS</button>
-        <button class="tab" data-tab="launchpad">MEME</button>
-        <button class="tab" data-tab="bots">BOTS</button>
-        <button class="tab" data-tab="earn">EARN</button>
-        <button class="tab" data-tab="duels">DUEL</button>
-    </div>
-
-    <!-- SPOT TRADING TAB -->
-    <div class="tab-content active" id="tab-spot">
-        <div class="exchange-layout">
-            <div class="ex-left">
-                <div class="ex-section" style="padding:0;overflow:hidden">
-                    <div id="tvChart" style="width:100%;height:350px"></div>
+        <div class="flex gap-8" style="margin-bottom:8px">
+            <div class="flex-1"><div class="ob-wrap" id="spotOrderBookWrap"><div class="skeleton skeleton-line w-full" style="height:200px"></div></div></div>
+            <div class="flex-1 flex flex-col gap-8">
+                <div class="side-toggle" id="spotSideToggle">
+                    <button class="side-btn buy active" onclick="setSpotSide('BUY')">BUY</button>
+                    <button class="side-btn sell" onclick="setSpotSide('SELL')">SELL</button>
                 </div>
-                <div class="ex-section">
-                    <select id="spotPairs" class="select" style="margin-bottom:8px"></select>
-                    <div id="spotTicker" style="padding:8px 0"></div>
-                </div>
-                <div class="ex-section" style="flex:1;overflow-y:auto">
-                    <div id="spotOrderBook" style="font-size:12px">Loading order book...</div>
-                </div>
-            </div>
-            <div class="ex-right">
-                <div class="ex-section">
-                    <div style="display:flex;gap:6px;margin-bottom:8px">
-                        <button id="spotBuyBtn" class="side-btn side-active-green" onclick="toggleSpotSide('BUY')">BUY</button>
-                        <button id="spotSellBtn" class="side-btn" onclick="toggleSpotSide('SELL')">SELL</button>
-                        <span id="spotSide" style="display:none"></span>
-                    </div>
-                    <select id="spotOrderType" class="select" style="margin-bottom:6px">
-                        <option value="LIMIT">Limit</option>
-                        <option value="MARKET">Market</option>
-                    </select>
-                    <input type="text" id="spotPrice" class="input" placeholder="Price (USDT)" style="margin-bottom:6px">
-                    <input type="text" id="spotQty" class="input" placeholder="Quantity" style="margin-bottom:8px">
-                    <button class="btn btn-primary btn-block" onclick="placeSpotOrder()">Place Order</button>
-                </div>
+                <select class="select text-sm" id="spotOrderType"><option value="LIMIT">Limit</option><option value="MARKET">Market</option><option value="STOP_LIMIT">Stop-Limit</option></select>
+                <input type="text" class="input text-sm" id="spotPrice" placeholder="Price (USDT)">
+                <input type="text" class="input text-sm" id="spotQty" placeholder="Quantity">
+                <div class="flex justify-between text-xs text-muted"><span>Total</span><span class="font-mono" id="spotTotal">0.00 USDT</span></div>
+                <button class="btn btn-green btn-block" id="spotSubmitBtn" onclick="placeSpotOrder()">BUY TON</button>
+                <div id="spotLastTrades" class="text-xs" style="max-height:120px;overflow-y:auto"></div>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- FUTURES TAB -->
-    <div class="tab-content" id="tab-futures">
-        <div class="exchange-layout">
-            <div class="ex-right" style="max-width:400px;margin:0 auto">
-                <div class="ex-section">
-                    <h3 style="margin-bottom:10px;font-size:15px">Open Position</h3>
-                    <select id="futSymbol" class="select" style="margin-bottom:8px">
-                        <option value="BTC_USDT_PERP">BTC/USDT Perp</option>
-                        <option value="ETH_USDT_PERP">ETH/USDT Perp</option>
-                        <option value="TON_USDT_PERP">TON/USDT Perp</option>
-                        <option value="SOL_USDT_PERP">SOL/USDT Perp</option>
-                        <option value="DOGE_USDT_PERP">DOGE/USDT Perp</option>
-                    </select>
-                    <div style="display:flex;gap:6px;margin-bottom:8px">
-                        <button id="futLongBtn" class="side-btn side-active-green" onclick="toggleFutSide('LONG')">LONG</button>
-                        <button id="futShortBtn" class="side-btn" onclick="toggleFutSide('SHORT')">SHORT</button>
-                    </div>
-                    <label style="font-size:12px;color:var(--text-muted)">Leverage: <span id="futLevLabel">10x</span></label>
-                    <input type="range" id="futLeverage" min="1" max="125" value="10" style="width:100%;margin-bottom:8px"
-                        oninput="document.getElementById('futLevLabel').textContent=this.value+'x'">
-                    <input type="text" id="futQty" class="input" placeholder="Quantity" style="margin-bottom:10px">
-                    <button class="btn btn-primary btn-block" onclick="openFuturesPosition()">Open Position</button>
-                </div>
-                <div id="futuresPositions" style="margin-top:12px"></div>
+<!-- ============ FUTURES ============ -->
+<div class="tab-page" id="tab-futures">
+    <div class="ticker-main"><div class="text-sm text-muted">Perpetual Futures</div></div>
+    <div style="padding:0 12px">
+        <select class="select mb-8" id="futSymbol" onchange="loadFuturesChart()">
+            <option value="BTC_USDT_PERP">BTC/USDT PERP</option>
+            <option value="ETH_USDT_PERP">ETH/USDT PERP</option>
+            <option value="TON_USDT_PERP">TON/USDT PERP</option>
+            <option value="SOL_USDT_PERP">SOL/USDT PERP</option>
+            <option value="DOGE_USDT_PERP">DOGE/USDT PERP</option>
+        </select>
+        <div id="futChart" style="width:100%;height:250px;border-radius:8px;overflow:hidden;margin-bottom:10px"></div>
+        <div class="card mb-8">
+            <div class="side-toggle mb-8" id="futSideToggle">
+                <button class="side-btn buy active" onclick="setFutSide('LONG')">LONG</button>
+                <button class="side-btn sell" onclick="setFutSide('SHORT')">SHORT</button>
             </div>
+            <select class="select text-sm mb-6" id="futOrderType"><option value="MARKET">Market</option><option value="LIMIT">Limit</option></select>
+            <input type="text" class="input text-sm mb-6" id="futQty" placeholder="Quantity">
+            <div class="lev-slider-wrap mb-8">
+                <div class="flex justify-between text-xs text-muted mb-4"><span>Leverage</span><span class="font-mono" id="futLevLabel">10x</span></div>
+                <input type="range" class="lev-slider" id="futLeverage" min="1" max="125" value="10" oninput="updateLevLabel(this.value)">
+                <div class="lev-labels"><span>1x</span><span>25x</span><span>50x</span><span>75x</span><span>100x</span><span>125x</span></div>
+            </div>
+            <div class="flex gap-8"><button class="btn btn-green btn-block flex-1" onclick="openFuturesPosition()">OPEN LONG</button></div>
+        </div>
+        <div id="futuresPositions"></div>
+        <div class="card mb-8">
+            <div class="flex justify-between text-xs text-muted"><span>Funding Rate</span><span>Next settlement</span></div>
+            <div class="flex justify-between text-sm font-mono"><span id="futFundingRate">+0.01%</span><span id="futFundingNext">4h 23m</span></div>
         </div>
     </div>
+</div>
 
-    <!-- P2P BUY TAB (was first tab) -->
-    <div class="tab-content" id="tab-buy">
-        <div style="display:flex;gap:8px;margin-bottom:12px">
-            <button class="side-btn side-active-green" id="p2pBuyBtn" onclick="toggleP2PSide('buy')">BUY USDT</button>
-            <button class="side-btn" id="p2pSellBtn" onclick="toggleP2PSide('sell')">SELL USDT</button>
+<!-- ============ P2P ============ -->
+<div class="tab-page" id="tab-p2p">
+    <div style="padding:12px">
+        <div class="side-toggle mb-12" id="p2pSideToggle">
+            <button class="side-btn buy active" onclick="switchP2PSide('buy')">BUY USDT</button>
+            <button class="side-btn sell" onclick="switchP2PSide('sell')">SELL USDT</button>
         </div>
-        <div id="p2pBuySection">
-        <div class="offers-filter">
-            <select id="paymentFilter" class="select">
-                <option value="">All payment methods</option>
-                <option value="SBP">SBP</option>
-                <option value="T-Bank">T-Bank</option>
-                <option value="Sberbank">Sberbank</option>
-                <option value="Raiffeisen">Raiffeisen</option>
-            </select>
-            <select id="sortFilter" class="select">
-                <option value="price">Cheapest first</option>
-                <option value="rating">Best rating first</option>
-            </select>
+        <div class="filter-chips" id="p2pFilterChips">
+            <span class="filter-chip active" onclick="filterP2P('all',this)">All</span>
+            <span class="filter-chip" onclick="filterP2P('SBP',this)">SBP</span>
+            <span class="filter-chip" onclick="filterP2P('T-Bank',this)">T-Bank</span>
+            <span class="filter-chip" onclick="filterP2P('Sberbank',this)">Sberbank</span>
+            <span class="filter-chip" onclick="filterP2P('Raiffeisen',this)">Raiffeisen</span>
         </div>
-        <div class="offers-list" id="offersBuy"></div>
-        </div>
-        <div id="p2pSellSection" style="display:none">
-        <div class="offers-filter">
-            <select id="paymentFilterSell" class="select">
-                <option value="">All payment methods</option>
-                <option value="SBP">SBP</option>
-                <option value="T-Bank">T-Bank</option>
-                <option value="Sberbank">Sberbank</option>
-            </select>
-            <select id="sortFilterSell" class="select">
-                <option value="price">Best price first</option>
-                <option value="rating">Best rating first</option>
-            </select>
-        </div>
-        <div class="offers-list" id="offersSell"></div>
-        </div>
+        <div id="p2pOffers"></div>
+        <button class="btn btn-primary btn-block mt-12" onclick="showCreateOfferForm()">+ Create Offer</button>
     </div>
+</div>
 
-    <div class="tab-content" id="tab-charts">
-        <div class="charts-section">
-            <div class="chart-container">
-                <div id="tradingview-widget" style="height:300px"></div>
-            </div>
-            <div style="padding:12px;display:flex;gap:8px;flex-wrap:wrap">
-                <div class="rate-card" id="rateBinance">Binance: --</div>
-                <div class="rate-card" id="rateBybit">Bybit: --</div>
-                <div class="rate-card" id="rateP2P">P2P Avg: 92.50 RUB</div>
-            </div>
-            <div class="commission-info" id="commissionInfo"></div>
+<!-- ============ DEALS ============ -->
+<div class="tab-page" id="tab-deals">
+    <div style="padding:12px">
+        <div class="filter-chips mb-12" id="dealsFilterChips">
+            <span class="filter-chip active" onclick="filterDeals('all',this)">All</span>
+            <span class="filter-chip" onclick="filterDeals('active',this)">Active</span>
+            <span class="filter-chip" onclick="filterDeals('completed',this)">Completed</span>
+            <span class="filter-chip" onclick="filterDeals('disputed',this)">Disputed</span>
         </div>
+        <div id="dealsList"></div>
     </div>
+</div>
 
-    <div class="tab-content" id="tab-deals">
-        <div class="deals-list" id="dealsList"></div>
-    </div>
-
-    <!-- EARN TAB -->
-    <div class="tab-content" id="tab-earn">
-        <h3 style="margin-bottom:12px;font-size:16px;color:var(--green)">Earn / Staking</h3>
-        <p style="color:var(--text-muted);margin-bottom:12px">Earn passive income. Flexible = redeem anytime. Locked = higher APR.</p>
-        <div id="earnProducts" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
-    </div>
-
-    <!-- OPTIONS TAB -->
-    <div class="tab-content" id="tab-options">
-        <div style="display:flex;gap:8px;margin-bottom:12px">
-            <button class="side-btn side-active-green" id="optCallBtn" onclick="toggleOptionMode('call')">CALL</button>
-            <button class="side-btn" id="optPutBtn" onclick="toggleOptionMode('put')">PUT</button>
-            <select id="optSymbol" class="select" style="width:auto;margin-left:auto" onchange="loadOptionChain()">
-                <option value="BTC_USDT">BTC</option>
-                <option value="ETH_USDT">ETH</option>
-                <option value="SOL_USDT">SOL</option>
-            </select>
+<!-- ============ EARN ============ -->
+<div class="tab-page" id="tab-earn">
+    <div style="padding:12px">
+        <div class="card mb-12">
+            <div class="flex justify-between text-sm"><span class="text-muted">Available</span><span class="font-mono">12,456.78 USDT</span></div>
+            <div class="flex justify-between text-sm mt-4"><span class="text-muted">Staked</span><span class="font-mono">5,000.00 USDT</span></div>
+            <div class="flex justify-between text-sm mt-4"><span class="text-muted">Total Earned</span><span class="text-green font-mono">+34.50 USDT</span></div>
         </div>
-        <div id="optionChain" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+        <div class="card-grid mb-12" id="earnProducts"></div>
+        <div id="earnMyPositions"></div>
     </div>
+</div>
 
-    <!-- BOTS TAB -->
-    <div class="tab-content" id="tab-bots">
-        <h3 style="margin-bottom:12px;font-size:15px">Trading Bots</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-            <div class="card" style="text-align:center">
-                <h4>Grid Bot</h4><p style="font-size:12px;color:var(--text-muted)">Buy low, sell high in range</p>
-                <button class="btn btn-primary" style="margin-top:8px;font-size:12px" onclick="showGridForm()">Create</button>
-            </div>
-            <div class="card" style="text-align:center">
-                <h4>DCA Bot</h4><p style="font-size:12px;color:var(--text-muted)">Auto-invest on schedule</p>
-                <button class="btn btn-primary" style="margin-top:8px;font-size:12px" onclick="showDCAForm()">Create</button>
-            </div>
-            <div class="card" style="text-align:center">
-                <h4>Martingale</h4><p style="font-size:12px;color:var(--text-muted)">Double down on dips</p>
-                <button class="btn btn-primary" style="margin-top:8px;font-size:12px" onclick="showMartingaleForm()">Create</button>
-            </div>
-            <div class="card" style="text-align:center">
-                <h4>Combo</h4><p style="font-size:12px;color:var(--text-muted)">Trade multiple pairs</p>
-                <button class="btn btn-primary" style="margin-top:8px;font-size:12px" onclick="showComboForm()">Create</button>
-            </div>
-            <div class="card" style="text-align:center">
-                <h4>Arbitrage</h4><p style="font-size:12px;color:var(--text-muted)">Cross-pair spreads</p>
-                <button class="btn btn-primary" style="margin-top:8px;font-size:12px" onclick="showArbitrageForm()">Create</button>
-            </div>
-            <div class="card" style="text-align:center">
-                <h4>Signal</h4><p style="font-size:12px;color:var(--text-muted)">TradingView alerts</p>
-                <button class="btn btn-primary" style="margin-top:8px;font-size:12px" onclick="showSignalForm()">Create</button>
-            </div>
-            <div class="card" style="text-align:center">
-                <h4>Copy Trade</h4><p style="font-size:12px;color:var(--text-muted)">Mirror pro traders</p>
-                <button class="btn btn-primary" style="margin-top:8px;font-size:12px" onclick="loadCopyTradeMasters()">View Masters</button>
-            </div>
+<!-- ============ MORE: OPTIONS ============ -->
+<div class="tab-page" id="tab-options">
+    <div style="padding:12px">
+        <select class="select mb-8" id="optSymbol" onchange="loadOptionChain()">
+            <option value="BTC_USDT">BTC/USDT</option>
+            <option value="ETH_USDT">ETH/USDT</option>
+            <option value="SOL_USDT">SOL/USDT</option>
+        </select>
+        <div id="optionChain"></div>
+    </div>
+</div>
+
+<!-- ============ MORE: BOTS ============ -->
+<div class="tab-page" id="tab-bots">
+    <div style="padding:12px">
+        <div class="grid grid-cols-2 gap-8 mb-12" id="botCreateGrid">
+            <div class="card text-center" onclick="showGridForm()"><div class="text-lg mb-4">#</div><div class="text-sm">Grid Bot</div><div class="text-xs text-muted">Buy low, sell high</div></div>
+            <div class="card text-center" onclick="showDCAForm()"><div class="text-lg mb-4">$</div><div class="text-sm">DCA Bot</div><div class="text-xs text-muted">Auto-invest</div></div>
+            <div class="card text-center" onclick="showMartingaleForm()"><div class="text-lg mb-4">x2</div><div class="text-sm">Martingale</div><div class="text-xs text-muted">Double on dips</div></div>
+            <div class="card text-center" onclick="showComboForm()"><div class="text-lg mb-4">8</div><div class="text-sm">Combo</div><div class="text-xs text-muted">Multi-pair</div></div>
+            <div class="card text-center" onclick="showArbitrageForm()"><div class="text-lg mb-4">&lt;&gt;</div><div class="text-sm">Arbitrage</div><div class="text-xs text-muted">Cross-pair</div></div>
+            <div class="card text-center" onclick="showSignalForm()"><div class="text-lg mb-4">@</div><div class="text-sm">Signal</div><div class="text-xs text-muted">TradingView</div></div>
         </div>
-        <div id="botForm" style="display:none"></div>
         <div id="myBots"></div>
-        <div id="copyTradeMasters"></div>
     </div>
+</div>
 
-    <!-- MEME / LAUNCHPAD TAB -->
-    <div class="tab-content" id="tab-launchpad">
-        <h3 style="margin-bottom:8px;font-size:15px;color:var(--yellow)">Meme Launchpad</h3>
-        <p style="color:var(--text-muted);margin-bottom:8px;font-size:12px">Create tokens on bonding curve. Gas is paid by buyers (Lazy Minting).</p>
-        <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:12px">
-            <div class="card">
-                <input type="text" id="memeName" class="input" placeholder="Token Name" style="margin-bottom:4px">
-                <input type="text" id="memeTicker" class="input" placeholder="TICKER" style="margin-bottom:6px">
-                <button class="btn btn-primary btn-block" style="font-size:12px" onclick="createMemeToken()">Create Token (1-click)</button>
-            </div>
+<!-- ============ MORE: MEME ============ -->
+<div class="tab-page" id="tab-meme">
+    <div style="padding:12px">
+        <div class="card mb-12">
+            <input type="text" class="input mb-6" id="memeName" placeholder="Token Name (e.g. RocketDog)">
+            <input type="text" class="input mb-8" id="memeTicker" placeholder="Ticker (e.g. RDOG)">
+            <button class="btn btn-primary btn-block" onclick="createMemeToken()">Create Token</button>
         </div>
-        <div id="bondingTokens" style="display:grid;gap:8px"></div>
+        <div id="bondingTokens" class="grid grid-cols-2 gap-8"></div>
     </div>
+</div>
 
-    <!-- DUEL TAB -->
-    <div class="tab-content" id="tab-duels">
-        <h3 style="margin-bottom:12px;font-size:15px;color:var(--red)">Trading Duels</h3>
-        <p style="color:var(--text-muted);margin-bottom:8px;font-size:12px">Bet against another trader. Predict 3 candles. Winner takes all.</p>
-        <div class="card" style="margin-bottom:12px">
-            <input type="text" id="duelBet" class="input" placeholder="Bet amount (USDT)" value="10" style="margin-bottom:6px">
-            <select id="duelSymbol" class="select" style="margin-bottom:6px"><option>TON_USDT</option><option>BTC_USDT</option><option>ETH_USDT</option></select>
+<!-- ============ MORE: DUEL ============ -->
+<div class="tab-page" id="tab-duel">
+    <div style="padding:12px">
+        <div class="card mb-12">
+            <select class="select mb-6" id="duelSymbol"><option>TON_USDT</option><option>BTC_USDT</option></select>
+            <input type="text" class="input mb-8" id="duelBet" placeholder="Bet amount (USDT)" value="10">
             <button class="btn btn-red btn-block" onclick="createDuel()">Create Duel</button>
         </div>
-        <div id="duelsList" style="display:grid;gap:8px"></div>
+        <div id="duelsList"></div>
+        <div class="mt-12"><h4 class="text-sm text-muted mb-8">History</h4><div id="duelHistory" class="text-xs text-dim"></div></div>
     </div>
+</div>
 
-    <div class="tab-content" id="tab-profile">
-        <div class="profile-section" id="profileSection"></div>
+</main>
+
+<!-- BOTTOM NAV -->
+<nav class="bottom-nav" id="bottomNav">
+    <div class="nav-item active" data-page="spot" onclick="switchPage('spot')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        TRADE
     </div>
-
-    <div class="stats-bar" id="statsBar"></div>
-
-    <!-- Create Offer Modal -->
-    <div class="modal" id="createOfferModal">
-        <div class="modal-content">
-            <h3>Create Offer</h3>
-            <div class="form-group">
-                <label>Type</label>
-                <select id="offerType" class="input">
-                    <option value="sell">Sell USDT</option>
-                    <option value="buy">Buy USDT</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Amount (USDT)</label>
-                <input type="number" id="offerAmount" class="input" placeholder="1000" step="0.01" min="1">
-            </div>
-            <div class="form-group">
-                <label>Price per USDT (RUB)</label>
-                <input type="number" id="offerPrice" class="input" placeholder="92.50" step="0.01" min="0.01">
-            </div>
-            <div class="form-group">
-                <label>Min amount (RUB)</label>
-                <input type="number" id="offerMin" class="input" placeholder="5000" step="1" min="0">
-            </div>
-            <div class="form-group">
-                <label>Max amount (RUB)</label>
-                <input type="number" id="offerMax" class="input" placeholder="50000" step="1" min="0">
-            </div>
-            <div class="form-group">
-                <label>Payment methods (comma separated)</label>
-                <input type="text" id="offerPayMethods" class="input" placeholder="SBP, T-Bank, Sberbank">
-            </div>
-            <div class="modal-actions">
-                <button class="btn-cancel" id="btnCancelOffer">Cancel</button>
-                <button class="btn-primary" id="btnCreateOffer">Create</button>
-            </div>
+    <div class="nav-item" data-page="futures" onclick="switchPage('futures')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        FUTURES
+    </div>
+    <div class="nav-item" data-page="p2p" onclick="switchPage('p2p')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        P2P
+    </div>
+    <div class="nav-item" data-page="earn" onclick="switchPage('earn')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        EARN
+    </div>
+    <div class="nav-item nav-item-more" id="navMore" onclick="toggleMoreMenu()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        MORE
+        <div class="nav-more-menu" id="navMoreMenu">
+            <div class="nav-more-item" onclick="switchPage('deals');toggleMoreMenu()">Deals</div>
+            <div class="nav-more-item" onclick="switchPage('options');toggleMoreMenu()">Options</div>
+            <div class="nav-more-item" onclick="switchPage('bots');toggleMoreMenu()">Bots</div>
+            <div class="nav-more-item" onclick="switchPage('meme');toggleMoreMenu()">Meme</div>
+            <div class="nav-more-item" onclick="switchPage('duel');toggleMoreMenu()">Duel</div>
         </div>
     </div>
+</nav>
 
-    <!-- Deal Detail Modal -->
-    <div class="modal" id="dealModal">
-        <div class="modal-content" id="dealModalContent"></div>
+<!-- MODALS -->
+<div class="modal-overlay" id="connectModal" style="display:none">
+    <div class="modal"><h3 class="mb-12">Connect Wallet</h3><div class="wallet-grid" id="walletGrid"></div><button class="btn btn-secondary btn-block mt-12" onclick="toggleConnectModal()">Close</button></div>
+</div>
+<div class="modal-overlay" id="offerModal" style="display:none">
+    <div class="modal">
+        <h3 class="mb-12">Create Offer</h3>
+        <select class="select mb-6" id="offerType"><option value="sell">Sell USDT</option><option value="buy">Buy USDT</option></select>
+        <input type="text" class="input mb-6" id="offerAmount" placeholder="Amount (USDT)">
+        <input type="text" class="input mb-6" id="offerPrice" placeholder="Price (RUB)">
+        <input type="text" class="input mb-6" id="offerMin" placeholder="Min amount (RUB)">
+        <input type="text" class="input mb-6" id="offerMax" placeholder="Max amount (RUB)">
+        <input type="text" class="input mb-8" id="offerPayMethods" placeholder="Payment methods (SBP, T-Bank)">
+        <button class="btn btn-primary btn-block" onclick="createOffer()">Create</button>
+        <button class="btn btn-secondary btn-block mt-8" onclick="document.getElementById('offerModal').style.display='none'">Cancel</button>
     </div>
+</div>
+<div class="toast" id="toast"></div>
 
-    <!-- Wallet Connect Modal -->
-    <div class="modal" id="connectModal">
-        <div class="modal-content" style="max-width:360px;padding:16px">
-            <h3 style="margin-bottom:16px;text-align:center">Connect Wallet</h3>
-            <div class="wallet-grid" id="walletGrid">
-                <div class="wallet-item" data-wallet="tonkeeper">
-                    <div class="wallet-icon" style="background:#0088CC">T</div>
-                    <span class="wallet-name">Tonkeeper</span>
-                </div>
-                <div class="wallet-item" data-wallet="tonhub">
-                    <div class="wallet-icon" style="background:#0066FF">H</div>
-                    <span class="wallet-name">Tonhub</span>
-                </div>
-                <div class="wallet-item" data-wallet="mytonwallet">
-                    <div class="wallet-icon" style="background:#00A3FF">M</div>
-                    <span class="wallet-name">MyTonWallet</span>
-                </div>
-                <div class="wallet-item" data-wallet="telegram">
-                    <div class="wallet-icon" style="background:#2AABEE">TG</div>
-                    <span class="wallet-name">Telegram Wallet</span>
-                </div>
-                <div class="wallet-item" data-wallet="metamask">
-                    <div class="wallet-icon" style="background:#F6851B">Fox</div>
-                    <span class="wallet-name">MetaMask</span>
-                </div>
-                <div class="wallet-item" data-wallet="trustwallet">
-                    <div class="wallet-icon" style="background:#3375BB">TW</div>
-                    <span class="wallet-name">Trust Wallet</span>
-                </div>
-                <div class="wallet-item" data-wallet="phantom">
-                    <div class="wallet-icon" style="background:#AB9FF2">P</div>
-                    <span class="wallet-name">Phantom</span>
-                </div>
-            </div>
-            <!-- EVM Recovery: shown after return from wallet deep-link -->
-            <div id="evmRecoveryBlock" style="display:none">
-                <p id="evmRecoveryMsg" style="text-align:center;font-size:13px;margin-bottom:12px;color:#c9d1d9"></p>
-                <input type="text" id="evmRecoveryInput" placeholder="0x..." style="width:100%;padding:10px;border:1px solid #30363d;border-radius:8px;background:#0d1117;color:#c9d1d9;font-size:14px;margin-bottom:10px">
-                <div style="display:flex;gap:8px">
-                    <button id="btnEVMConfirm" style="flex:1;padding:10px;background:#238636;border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer">Confirm</button>
-                    <button id="btnEVMBack" style="flex:1;padding:10px;background:#21262d;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;cursor:pointer">Back</button>
-                </div>
-                <p id="evmRecoveryError" style="text-align:center;font-size:12px;color:#f85149;margin-top:8px;display:none"></p>
-            </div>
-            <div id="connectStatus" style="text-align:center;margin-top:12px;font-size:12px;color:#8b949e"></div>
-            <div class="modal-actions" style="margin-top:12px">
-                <button class="btn-cancel" id="btnCancelConnect" style="width:100%">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="toast" id="toast"></div>
-
-    <!-- Transaction Progress -->
-    <div class="tx-progress" id="txProgress" style="display:none">
-        <div class="progress-bar"><div class="progress-fill" id="txProgressFill"></div></div>
-        <p id="txProgressText">Sending USDT...</p>
-    </div>
-
-    <button class="btn-float" id="btnFloatCreate" title="Create offer">+</button>
-
-    <!-- Wallet Modal -->
-    <div class="modal" id="walletModal">
-        <div class="modal-content">
-            <h3>Wallet</h3>
-            <div id="walletBalance" style="text-align:center;margin-bottom:12px;font-size:24px;font-weight:700;color:#58a6ff">0.00 USDT</div>
-            <div class="form-group">
-                <label>Amount (USDT)</label>
-                <input type="number" id="walletAmount" class="input" placeholder="10" step="0.01" min="1">
-            </div>
-            <div class="form-group">
-                <label>TON Transaction Hash (for deposit)</label>
-                <input type="text" id="walletTxHash" class="input" placeholder="Paste TX hash after sending">
-            </div>
-            <div class="form-group">
-                <label>Recipient Wallet (for withdrawal)</label>
-                <input type="text" id="walletRecipient" class="input" placeholder="UQ...">
-            </div>
-            <div class="modal-actions">
-                <button class="btn-primary" id="btnDeposit" style="background:#238636">Deposit</button>
-                <button class="btn-primary" id="btnWithdraw" style="background:#1f6feb">Withdraw</button>
-            </div>
-            <div style="margin-top:12px;font-size:11px;color:#8b949e;text-align:center">
-                Guarantor: UQAAECd3lxgQEr9w...<br>
-                Send USDT to this wallet, paste TX hash, confirm deposit.
-            </div>
-            <div class="modal-actions" style="margin-top:8px">
-                <button class="btn-cancel" id="btnCloseWallet">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="js/wallets.js"></script>
-    <script src="js/exchange.js"></script>
-    <script src="js/app.js"></script>
+<script src="js/app.js"></script>
+<script src="js/exchange.js"></script>
+<script src="js/wallets.js"></script>
 </body>
 </html>
