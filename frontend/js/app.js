@@ -1,59 +1,64 @@
 // P2P Exchange — Working Frontend
 // ============================================
-const API = 'https://p2p-exchange-api.vercel.app/api';
+const API = '/api';
 const tg = window.Telegram?.WebApp;
 let currentUser = null;
-let currentTab = 'buy';
+let currentTab = 'spot';
 
 function toast(msg) {
     const t = document.getElementById('toast');
+    if (!t) return;
     t.textContent = msg; t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 2500);
+    setTimeout(function() { t.classList.remove('show'); }, 2500);
 }
 
-async function api(path, method = 'GET', body = null) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (currentUser) headers['X-Telegram-User-ID'] = String(currentUser.id);
-    if (tg?.initData) headers['X-Telegram-InitData'] = tg.initData;
-    const opts = { method, headers };
+async function api(path, method, body) {
+    method = method || 'GET';
+    var headers = { 'Content-Type': 'application/json' };
+    if (tg && tg.initData) {
+        headers['X-Telegram-InitData'] = tg.initData;
+    }
+    if (currentUser) {
+        headers['X-Telegram-User-Id'] = String(currentUser.id);
+    }
+    var opts = { method: method, headers: headers };
     if (body) opts.body = JSON.stringify(body);
     try {
-        const res = await fetch(API + path, opts);
-        const data = await res.json();
+        var res = await fetch(API + path, opts);
+        var data = await res.json();
         if (!res.ok) { toast(data.error || 'Error ' + res.status); return null; }
         return data;
     } catch (e) {
         console.error('API:', e.message);
-        toast('Network error. Retrying...');
         return null;
     }
 }
 
 // ========== INIT ==========
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', function() {
     if (tg) { tg.ready(); tg.expand(); }
     window._currentUser = currentUser;
     initTabs();
     initAuth();
     initOfferForm();
-    loadBuyOffers();
+    // Don't load offers on start - exchange.js handles SPOT tab init
     loadLiveRates();
     setInterval(refreshData, 15000);
     setInterval(loadLiveRates, 30000);
 });
 
 async function initAuth() {
-    if (tg?.initDataUnsafe?.user) {
-        const u = tg.initDataUnsafe.user;
+    if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        var u = tg.initDataUnsafe.user;
         currentUser = { id: u.id, username: u.username, first_name: u.first_name };
-        await api('/auth', 'POST', { ...u, start_param: tg.initDataUnsafe?.start_param || '' });
+        try { await api('/auth', 'POST', { id: u.id, username: u.username }); } catch(e) {}
         toast(u.first_name || u.username || 'Connected');
     } else {
-        const storedId = localStorage.getItem('p2p_user_id');
-        const uid = storedId ? parseInt(storedId) : (Math.floor(Math.random() * 900000) + 100000);
+        var storedId = localStorage.getItem('p2p_user_id');
+        var uid = storedId ? parseInt(storedId) : (Math.floor(Math.random() * 900000) + 100000);
         localStorage.setItem('p2p_user_id', String(uid));
-        currentUser = { id: uid, username: 'web_user', first_name: 'Trader' };
-        await api('/auth', 'POST', { id: uid, username: 'web_user' });
+        currentUser = { id: uid, username: 'trader_' + uid, first_name: 'Trader' };
+        try { await api('/auth', 'POST', { id: uid, username: 'trader_' + uid }); } catch(e) {}
     }
     loadProfile();
 }
@@ -73,10 +78,12 @@ function initTabs() {
 }
 
 async function refreshData() {
-    if (currentTab === 'buy') await loadBuyOffers();
-    if (currentTab === 'sell') await loadSellOffers();
+    if (currentTab === 'buy') { await loadBuyOffers(); await loadSellOffers(); }
     if (currentTab === 'deals') await loadMyDeals();
-    if (currentTab === 'profile') await loadProfile();
+    if (currentTab === 'spot' || currentTab === 'futures' || currentTab === 'options' || currentTab === 'bots' || currentTab === 'earn' || currentTab === 'launchpad') {
+        // Exchange.js handles these tabs
+    }
+    loadBalances();
 }
 
 // ========== OFFERS ==========

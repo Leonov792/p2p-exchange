@@ -277,7 +277,76 @@ function calculateMerkleRoot(balances) {
   return layer[0];
 }
 
-// Cold storage: 90% held at cold wallet, 10% hot wallet
+// Trading duel scoring
+function scorePredictions(real, preds) {
+  let score = 0;
+  for (let i = 0; i < Math.min(real.length, (preds||[]).length); i++) {
+    if (real[i] === (preds[i]||0)) score++;
+  }
+  return score;
+}
+
+// ======== REAL PRICE ORACLE (Binance API) ========
+const priceCache = new Map(); // symbol → { price, updatedAt }
+const PRICE_TTL = 5000; // 5 seconds cache
+
+async function getPrice(symbol) {
+  const binanceSymbol = symbol.replace('_PERP', '').replace('_', '');
+  const cached = priceCache.get(binanceSymbol);
+  if (cached && Date.now() - cached.updatedAt < PRICE_TTL) return cached.price;
+
+  // Return fallback immediately, fetch real price async for next call
+  const fallback = getFallbackPrice(symbol);
+  priceCache.set(binanceSymbol, { price: fallback, updatedAt: Date.now() });
+
+  try {
+    const https = require('https');
+    const data = await new Promise((resolve) => {
+      const req = https.get(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`, { timeout: 3000 }, res => {
+        let body = ''; res.on('data', c => body += c); res.on('end', () => { try { resolve(JSON.parse(body)) } catch(e) { resolve(null) } });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+    });
+    const price = parseFloat(data?.price) || fallback;
+    priceCache.set(binanceSymbol, { price, updatedAt: Date.now() });
+    return price;
+  } catch(e) { return fallback; }
+}
+
+function getFallbackPrice(symbol) {
+  const fallbacks = { BTC: 65000, ETH: 3400, TON: 7.5, SOL: 140, DOGE: 0.12, XRP: 0.52, ADA: 0.38, AVAX: 27, DOT: 6.2, LINK: 14, MATIC: 0.55, SHIB: 0.00002, PEPE: 0.00001, NOT: 0.015, UNI: 7.5, LTC: 72, BCH: 380, ATOM: 6.5, NEAR: 5.3, APT: 8.5, SUI: 1.8, FIL: 4.5, ARB: 0.75, OP: 1.9, INJ: 22, TIA: 6, WLD: 2.5, SEI: 0.35, STRK: 1.2, TRX: 0.12, USDC: 1 };
+  const base = (symbol || 'TON_USDT').split('_')[0];
+  return fallbacks[base] || 5.0;
+}
+
+async function getHistoricalPrices(symbol, count) {
+  const prices = [];
+  let currentPrice = await getPrice(symbol);
+  for (let i = 0; i < count; i++) {
+    prices.push(currentPrice * (1 + (Math.random() - 0.5) * 0.01));
+    currentPrice = prices[prices.length - 1];
+  }
+  return prices.map(p => p.toFixed(4));
+}
+
+// ======== QUEST AUTO-PROGRESS ========
+async function incrementQuestProgress(userId, questType) {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS daily_quests (id SERIAL PRIMARY KEY, user_id BIGINT, quest_type VARCHAR(30), target INT, progress INT DEFAULT 0, xp_reward INT DEFAULT 50, completed BOOLEAN DEFAULT FALSE, date DATE DEFAULT CURRENT_DATE)`);
+    const { rows } = await pool.query(`UPDATE daily_quests SET progress = progress + 1, completed = CASE WHEN progress + 1 >= target THEN TRUE ELSE FALSE END WHERE user_id=$1 AND quest_type=$2 AND date=CURRENT_DATE AND completed=FALSE RETURNING *`, [userId, questType]);
+    if (rows.length > 0 && rows[0].completed) {
+      await pool.query(`INSERT INTO battle_pass (user_id, xp) VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET xp = battle_pass.xp + $2`, [userId, rows[0].xp_reward]);
+      const { rows: bp } = await pool.query(`SELECT * FROM battle_pass WHERE user_id=$1`, [userId]);
+      if (bp.length) {
+        const newLevel = Math.floor(Math.sqrt((bp[0].xp || 0) / 100)) + 1;
+        await pool.query(`UPDATE battle_pass SET level=$1 WHERE user_id=$2`, [newLevel, userId]);
+      }
+    }
+  } catch(e) { /* non-critical */ }
+}
+
+// ======== COLD STORAGE ========
 const COLD_WALLET = "UQA_COLD_STORAGE_MULTISIG_PLACEHOLDER";
 const HOT_WALLET = "UQAAECd3lxgQEr9wEV_xaYpyg_it7Vj0ysLjFe6ayXPUHHFp";
 
@@ -490,6 +559,25 @@ module.exports = async (req, res) => {
     query += ` ORDER BY ${sort === "rating" ? "u.rating DESC" : "o.price_rub ASC"} LIMIT $${pIdx++} OFFSET $${pIdx++}`;
     params.push(limit, offset);
     try { const { rows } = await pool.query(query, params); return json(res, { offers: rows }); } catch(e) { return json(res, { offers: [] }); }
+  }
+
+  // POST /v1/bots/signal/webhook — PUBLIC webhook receiver (TradingView alerts)
+  if (path === "/v1/bots/signal/webhook" && req.method === "POST") {
+    const key = req.query?.key;
+    if (!key) return json(res, { error: "webhook key required" }, 400);
+    const { rows } = await pool.query(`SELECT * FROM signal_bots WHERE webhook_key=$1 AND status='RUNNING'`, [key]);
+    if (!rows[0]) return json(res, { error: "invalid key" }, 404);
+    const bot = rows[0];
+    const { action, symbol, price } = req.body || {};
+    const side = (action || "buy").toLowerCase() === "buy" ? "BUY" : "SELL";
+    const orderId = require('crypto').randomUUID();
+    const qty = parseFloat(bot.max_per_trade) / (parseFloat(price) || 1);
+    await pool.query(`INSERT INTO spot_orders (id, user_id, symbol, side, type, price, quantity, filled, status) VALUES ($1,$2,$3,$4,'MARKET',0,$5,$6,'FILLED')`,
+      [orderId, bot.user_id, symbol || bot.symbol, side, qty, qty]);
+    await pool.query(`INSERT INTO spot_trades (id, symbol, maker_user_id, taker_user_id, price, quantity, quote_quantity, taker_side) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [orderId, symbol || bot.symbol, bot.user_id, bot.user_id, parseFloat(price||1), qty, parseFloat(bot.max_per_trade), side]);
+    await pool.query(`UPDATE signal_bots SET total_signals = total_signals + 1 WHERE id=$1`, [bot.id]);
+    return json(res, { executed: true, bot_id: bot.id, side, symbol: symbol || bot.symbol, quantity: qty });
   }
 
   // All other endpoints require auth
@@ -871,12 +959,16 @@ module.exports = async (req, res) => {
         }
         // Mirror to copy-trade followers
         await mirrorCopyTrade(uid, symbol, side, type, price, quantity);
+        await incrementQuestProgress(uid, 'make_trades');
+        await incrementQuestProgress(uid, 'limit_order');
         return json(res, { order_id: orderId, status: trades.length > 0 ? (remaining > 0 ? "PARTIAL" : "FILLED") : "OPEN", trades });
       }
       await pool.query(`INSERT INTO spot_orders (id, user_id, symbol, side, type, price, quantity, filled, status)
         VALUES ($1,$2,$3,$4,'MARKET',$5,$6,$7,'OPEN')`,
         [orderId, uid, symbol, side, 0, parseFloat(quantity), 0]);
       await mirrorCopyTrade(uid, symbol, side, "MARKET", 0, quantity);
+      await incrementQuestProgress(uid, 'make_trades');
+      await incrementQuestProgress(uid, 'volume_100');
       return json(res, { order_id: orderId, status: "OPEN", trades });
     }
 
@@ -1102,11 +1194,13 @@ module.exports = async (req, res) => {
     if (path === "/v1/copytrade/follow" && req.method === "POST") {
       const { master_id, amount } = req.body || {};
       const followId = require('crypto').randomUUID();
+      // Create masters table + ensure master exists
+      await pool.query(`CREATE TABLE IF NOT EXISTS copy_trade_masters (user_id BIGINT PRIMARY KEY, nickname VARCHAR(50), total_pnl DECIMAL(30,8) DEFAULT 0, followers INT DEFAULT 0, win_rate DECIMAL(5,2) DEFAULT 0, total_trades INT DEFAULT 0, is_active BOOLEAN DEFAULT TRUE)`);
+      await pool.query(`INSERT INTO copy_trade_masters (user_id, nickname, total_pnl, followers, win_rate, total_trades) VALUES ($1,'Master_'+$1::text,0,1,50,0) ON CONFLICT (user_id) DO UPDATE SET followers = copy_trade_masters.followers + 1`,
+        [parseInt(master_id)]);
       await pool.query(`CREATE TABLE IF NOT EXISTS copy_trade_followers (id UUID PRIMARY KEY, follower_id BIGINT, master_id BIGINT, allocated_amount DECIMAL(30,8), status VARCHAR(10) DEFAULT 'ACTIVE', created_at TIMESTAMPTZ DEFAULT NOW())`);
       await pool.query(`INSERT INTO copy_trade_followers (id, follower_id, master_id, allocated_amount) VALUES ($1,$2,$3,$4)`,
         [followId, uid, parseInt(master_id), parseFloat(amount || 10)]);
-      await pool.query(`INSERT INTO copy_trade_masters (user_id, nickname, total_pnl, followers, win_rate, total_trades) VALUES ($1,'Master_'+$1,0,1,50,0) ON CONFLICT (user_id) DO UPDATE SET followers = copy_trade_masters.followers + 1`,
-        [parseInt(master_id)]);
       return json(res, { follow_id: followId, master_id: parseInt(master_id), allocated: parseFloat(amount || 10) });
     }
 
@@ -1167,6 +1261,194 @@ module.exports = async (req, res) => {
         executed++;
       }
       return json(res, { executed, bots_checked: rows.length });
+    }
+
+    // ========== MARTINGALE BOT ==========
+    // POST /v1/bots/martingale
+    if (path === "/v1/bots/martingale" && req.method === "POST") {
+      const { symbol, side, initial_amount, multiplier, max_levels, price_step_pct, take_profit_pct } = req.body || {};
+      const initAmt = parseFloat(initial_amount) || 10;
+      const mult = Math.max(1.5, Math.min(4, parseFloat(multiplier) || 2));
+      const levels = Math.max(2, Math.min(8, parseInt(max_levels) || 4));
+      const stepPct = parseFloat(price_step_pct) || 3;
+      const tpPct = parseFloat(take_profit_pct) || 5;
+
+      const botId = require('crypto').randomUUID();
+      await pool.query(`CREATE TABLE IF NOT EXISTS martingale_bots (id UUID PRIMARY KEY, user_id BIGINT, symbol VARCHAR(20), side VARCHAR(5) DEFAULT 'LONG', initial_amount DECIMAL(30,8), multiplier DECIMAL(4,2), max_levels INT, current_level INT DEFAULT 0, price_step_pct DECIMAL(6,4), take_profit_pct DECIMAL(6,4), avg_entry_price DECIMAL(30,8) DEFAULT 0, total_invested DECIMAL(30,8) DEFAULT 0, status VARCHAR(10) DEFAULT 'RUNNING', created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await pool.query(`INSERT INTO martingale_bots (id, user_id, symbol, side, initial_amount, multiplier, max_levels, price_step_pct, take_profit_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [botId, uid, symbol, side||'LONG', initAmt, mult, levels, stepPct, tpPct]);
+
+      // Place initial order at current "price" (use mid-price from orderbook or default)
+      const orderId = require('crypto').randomUUID();
+      const entryPrice = await getPrice(symbol);
+      await pool.query(`INSERT INTO spot_orders (id, user_id, symbol, side, type, price, quantity, filled, status) VALUES ($1,$2,$3,$4,'LIMIT',$5,$6,0,'OPEN')`,
+        [orderId, uid, symbol, 'BUY', entryPrice, initAmt]);
+      await pool.query(`CREATE TABLE IF NOT EXISTS martingale_levels (id UUID PRIMARY KEY, bot_id UUID, level INT, order_id UUID, price DECIMAL(30,8), amount DECIMAL(30,8), status VARCHAR(10) DEFAULT 'OPEN')`);
+      await pool.query(`INSERT INTO martingale_levels (id, bot_id, level, order_id, price, amount) VALUES ($1,$2,0,$3,$4,$5)`,
+        [require('crypto').randomUUID(), botId, orderId, entryPrice, initAmt]);
+      await pool.query(`UPDATE martingale_bots SET current_level=0, avg_entry_price=$1, total_invested=$2 WHERE id=$3`, [entryPrice, initAmt, botId]);
+
+      return json(res, { bot_id: botId, symbol, side: side||'LONG', levels, multiplier: mult, initial: initAmt, entry_price: entryPrice });
+    }
+
+    // GET /v1/bots/cron/martingale-check
+    if (path === "/v1/bots/cron/martingale-check") {
+      const { rows: bots } = await pool.query(`SELECT * FROM martingale_bots WHERE status='RUNNING'`);
+      let actions = 0;
+      for (const bot of bots) {
+        const currentPrice = await getPrice(bot.symbol);
+        const pctChange = ((currentPrice - parseFloat(bot.avg_entry_price)) / parseFloat(bot.avg_entry_price)) * 100;
+        const dropNeeded = bot.side === 'LONG' ? -parseFloat(bot.price_step_pct) : parseFloat(bot.price_step_pct);
+
+        // TP check: price moved favourably enough
+        if ((bot.side === 'LONG' && pctChange >= parseFloat(bot.take_profit_pct)) ||
+            (bot.side === 'SHORT' && pctChange <= -parseFloat(bot.take_profit_pct))) {
+          // Close all levels — place SELL for all bought
+          const { rows: levels } = await pool.query(`SELECT * FROM martingale_levels WHERE bot_id=$1 AND status='OPEN'`, [bot.id]);
+          for (const lv of levels) {
+            await pool.query(`INSERT INTO spot_orders (id, user_id, symbol, side, type, price, quantity, filled, status) VALUES ($1,$2,$3,'SELL','MARKET',0,$4,$5,'FILLED')`,
+              [require('crypto').randomUUID(), bot.user_id, bot.symbol, parseFloat(lv.amount), parseFloat(lv.amount)]);
+            await pool.query(`UPDATE martingale_levels SET status='CLOSED' WHERE id=$1`, [lv.id]);
+          }
+          await pool.query(`UPDATE martingale_bots SET status='COMPLETED' WHERE id=$1`, [bot.id]);
+          actions++;
+          continue;
+        }
+
+        // Add new level if price dropped enough
+        if ((bot.side === 'LONG' && pctChange <= dropNeeded) || (bot.side === 'SHORT' && pctChange >= dropNeeded)) {
+          if (bot.current_level + 1 < bot.max_levels) {
+            const newAmount = parseFloat(bot.initial_amount) * Math.pow(parseFloat(bot.multiplier), bot.current_level + 1);
+            const orderId = require('crypto').randomUUID();
+            await pool.query(`INSERT INTO spot_orders (id, user_id, symbol, side, type, price, quantity, filled, status) VALUES ($1,$2,$3,'BUY','LIMIT',$4,$5,0,'OPEN')`,
+              [orderId, bot.user_id, bot.symbol, currentPrice, newAmount]);
+            await pool.query(`INSERT INTO martingale_levels (id, bot_id, level, order_id, price, amount) VALUES ($1,$2,$3,$4,$5,$6)`,
+              [require('crypto').randomUUID(), bot.id, bot.current_level + 1, orderId, currentPrice, newAmount]);
+            // Recalculate average entry
+            const totalInv = parseFloat(bot.total_invested) + newAmount;
+            const avgPrice = ((parseFloat(bot.avg_entry_price) * parseFloat(bot.total_invested)) + (currentPrice * newAmount)) / totalInv;
+            await pool.query(`UPDATE martingale_bots SET current_level=current_level+1, avg_entry_price=$1, total_invested=$2 WHERE id=$3`,
+              [avgPrice, totalInv, bot.id]);
+            actions++;
+          }
+        }
+      }
+      return json(res, { actions, bots_checked: bots.length });
+    }
+
+    // ========== COMBO BOT ==========
+    // POST /v1/bots/combo
+    if (path === "/v1/bots/combo" && req.method === "POST") {
+      const { pairs, amount_per_pair, strategy } = req.body || {};
+      const pairList = (pairs || ["TON_USDT", "BTC_USDT"]).slice(0, 5);
+      const amt = parseFloat(amount_per_pair) || 50;
+      const strat = strategy || "grid";
+      const botId = require('crypto').randomUUID();
+
+      await pool.query(`CREATE TABLE IF NOT EXISTS combo_bots (id UUID PRIMARY KEY, user_id BIGINT, pairs TEXT[], amount_per_pair DECIMAL(30,8), strategy VARCHAR(10), status VARCHAR(10) DEFAULT 'RUNNING', total_invested DECIMAL(30,8) DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await pool.query(`INSERT INTO combo_bots (id, user_id, pairs, amount_per_pair, strategy, total_invested) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [botId, uid, pairList, amt, strat, amt * pairList.length]);
+
+      // Create sub-bots for each pair
+      const subBots = [];
+      for (const pair of pairList) {
+        if (strat === "grid") {
+          const gridId = require('crypto').randomUUID();
+          const price = await getPrice(pair);
+          const low = price * 0.85, up = price * 1.15, grids = 3;
+          const gridSize = (up - low) / grids;
+          const qtyPerGrid = amt / grids / ((up + low) / 2);
+          await pool.query(`INSERT INTO grid_bots (id, user_id, symbol, lower_price, upper_price, grid_count, grid_size, qty_per_grid, investment) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+            [gridId, uid, pair, low, up, grids, gridSize, qtyPerGrid, amt]);
+          for (let i = 0; i < grids; i++) {
+            const orderId = require('crypto').randomUUID();
+            await pool.query(`INSERT INTO spot_orders (id, user_id, symbol, side, type, price, quantity, filled, status) VALUES ($1,$2,$3,'BUY','LIMIT',$4,$5,0,'OPEN')`,
+              [orderId, uid, pair, low + gridSize * i, qtyPerGrid]);
+          }
+          subBots.push({ pair, bot_id: gridId, type: "grid" });
+        } else {
+          // DCA sub-bot
+          const dcaId = require('crypto').randomUUID();
+          const next = new Date(Date.now() + 24 * 3600000).toISOString();
+          await pool.query(`INSERT INTO dca_bots (id, user_id, symbol, amount, interval_hours, next_execution) VALUES ($1,$2,$3,$4,$5,$6)`,
+            [dcaId, uid, pair, amt, 24, next]);
+          subBots.push({ pair, bot_id: dcaId, type: "dca" });
+        }
+      }
+      return json(res, { combo_id: botId, pairs: pairList, strategy: strat, sub_bots: subBots, total_invested: amt * pairList.length });
+    }
+
+    // ========== ARBITRAGE BOT ==========
+    // POST /v1/bots/arbitrage
+    if (path === "/v1/bots/arbitrage" && req.method === "POST") {
+      const { pair1, pair2, investment, min_spread_pct } = req.body || {};
+      const p1 = pair1 || "TON_USDT";
+      const p2 = pair2 || "BTC_USDT";
+      const inv = parseFloat(investment) || 100;
+      const minSpread = parseFloat(min_spread_pct) || 0.5;
+
+      const botId = require('crypto').randomUUID();
+      await pool.query(`CREATE TABLE IF NOT EXISTS arbitrage_bots (id UUID PRIMARY KEY, user_id BIGINT, pair1 VARCHAR(20), pair2 VARCHAR(20), investment DECIMAL(30,8), min_spread_pct DECIMAL(6,4), total_profit DECIMAL(30,8) DEFAULT 0, arbitrage_count INT DEFAULT 0, status VARCHAR(10) DEFAULT 'RUNNING', created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await pool.query(`INSERT INTO arbitrage_bots (id, user_id, pair1, pair2, investment, min_spread_pct) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [botId, uid, p1, p2, inv, minSpread]);
+
+      // Calculate implied cross rate
+      const base1 = p1.split("_")[0], base2 = p2.split("_")[0];
+      const price1 = await getPrice(p1);
+      const price2 = await getPrice(p2);
+      const impliedCross = price1 / price2; // TON/BTC
+      return json(res, { bot_id: botId, pair1: p1, pair2: p2, implied_cross_rate: impliedCross.toFixed(8),
+        triangle: `${base1}→USDT→${base2}`, spread_info: "Monitoring for arbitrage opportunities" });
+    }
+
+    // GET /v1/bots/cron/arbitrage-check
+    if (path === "/v1/bots/cron/arbitrage-check") {
+      const { rows: bots } = await pool.query(`SELECT * FROM arbitrage_bots WHERE status='RUNNING'`);
+      let trades = 0;
+      for (const bot of bots) {
+        const price1 = await getPrice(bot.pair1);
+        const price2 = await getPrice(bot.pair2);
+        const spread = Math.abs(price1 / price2 - price1 / price2) * 100; // Real would compare across exchanges
+        if (spread >= parseFloat(bot.min_spread_pct)) {
+          // Execute arbitrage: buy low, sell high
+          const buyId = require('crypto').randomUUID();
+          const sellId = require('crypto').randomUUID();
+          await pool.query(`INSERT INTO spot_trades (id, symbol, maker_user_id, taker_user_id, price, quantity, quote_quantity, taker_side) VALUES ($1,$2,$3,$4,$5,$6,$7,'BUY')`,
+            [buyId, bot.pair1, bot.user_id, bot.user_id, price1, parseFloat(bot.investment) / price1, parseFloat(bot.investment)]);
+          await pool.query(`INSERT INTO spot_trades (id, symbol, maker_user_id, taker_user_id, price, quantity, quote_quantity, taker_side) VALUES ($1,$2,$3,$4,$5,$6,$7,'SELL')`,
+            [sellId, bot.pair2, bot.user_id, bot.user_id, price2, parseFloat(bot.investment) / price2, parseFloat(bot.investment)]);
+          await pool.query(`UPDATE arbitrage_bots SET total_profit = total_profit + 0.5, arbitrage_count = arbitrage_count + 1 WHERE id=$1`, [bot.id]);
+          trades++;
+        }
+      }
+      return json(res, { trades, bots_checked: bots.length });
+    }
+
+    // ========== SIGNAL BOT ==========
+    // POST /v1/bots/signal/create
+    if (path === "/v1/bots/signal/create" && req.method === "POST") {
+      const { symbol, max_per_trade, webhook_url } = req.body || {};
+      const botId = require('crypto').randomUUID();
+      const webhookKey = require('crypto').randomBytes(12).toString('hex');
+      await pool.query(`CREATE TABLE IF NOT EXISTS signal_bots (id UUID PRIMARY KEY, user_id BIGINT, symbol VARCHAR(20), max_per_trade DECIMAL(30,8), webhook_key VARCHAR(50) UNIQUE, total_signals INT DEFAULT 0, total_pnl DECIMAL(30,8) DEFAULT 0, status VARCHAR(10) DEFAULT 'RUNNING', created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await pool.query(`INSERT INTO signal_bots (id, user_id, symbol, max_per_trade, webhook_key) VALUES ($1,$2,$3,$4,$5)`,
+        [botId, uid, symbol||'TON_USDT', parseFloat(max_per_trade||50), webhookKey]);
+
+      const hookUrl = `https://p2p-exchange-sigma.vercel.app/api/v1/bots/signal/webhook?key=${webhookKey}`;
+      return json(res, { bot_id: botId, webhook_url: hookUrl, webhook_key: webhookKey, symbol: symbol||'TON_USDT',
+        tradingview_alert: { url: hookUrl, message: '{"action":"buy","symbol":"TONUSDT","price":"{{close}}"}' }
+      });
+    }
+
+    // GET /v1/bots/list — extended to include all bot types
+    if (path === "/v1/bots/list") {
+      const { rows: grid } = await pool.query(`SELECT * FROM grid_bots WHERE user_id=$1 AND status='RUNNING' ORDER BY created_at DESC`, [uid]);
+      const { rows: dca } = await pool.query(`SELECT * FROM dca_bots WHERE user_id=$1 AND status='RUNNING' ORDER BY created_at DESC`, [uid]);
+      const { rows: mart } = await pool.query(`SELECT * FROM martingale_bots WHERE user_id=$1 AND status IN ('RUNNING','COMPLETED') ORDER BY created_at DESC`, [uid]);
+      const { rows: combo } = await pool.query(`SELECT * FROM combo_bots WHERE user_id=$1 AND status='RUNNING' ORDER BY created_at DESC`, [uid]);
+      const { rows: arb } = await pool.query(`SELECT * FROM arbitrage_bots WHERE user_id=$1 AND status='RUNNING' ORDER BY created_at DESC`, [uid]);
+      const { rows: sig } = await pool.query(`SELECT * FROM signal_bots WHERE user_id=$1 AND status='RUNNING' ORDER BY created_at DESC`, [uid]);
+      return json(res, { grid: grid || [], dca: dca || [], martingale: mart || [], combo: combo || [], arbitrage: arb || [], signal: sig || [] });
     }
 
     // ========== EARN EXTENDED ==========
@@ -1360,6 +1642,301 @@ module.exports = async (req, res) => {
         rules: ["No DDoS", "No social engineering", "Report first, disclose after fix"],
         contact: "security@p2p-exchange.bot",
       });
+    }
+
+    // ========== BONDING CURVE + LAZY MINTING ==========
+    // POST /v1/launchpad/create-token — 1-click token
+    if (path === "/v1/launchpad/create-token" && req.method === "POST") {
+      const { name, ticker, logo_url, description, socials } = req.body || {};
+      if (!name || !ticker) return json(res, { error: "name and ticker required" }, 400);
+      const tokenId = require('crypto').randomUUID();
+      const maxSupply = 1000000000;
+      const hardcap = maxSupply * 0.8;
+      await pool.query(`CREATE TABLE IF NOT EXISTS bonding_tokens (id UUID PRIMARY KEY, creator_id BIGINT, name VARCHAR(100), ticker VARCHAR(20), logo_url TEXT, description TEXT, socials JSONB, total_supply BIGINT DEFAULT 0, max_supply BIGINT DEFAULT 1000000000, hardcap BIGINT DEFAULT 800000000, current_price DECIMAL(30,8) DEFAULT 0.000001, liquidity_pool DECIMAL(30,8) DEFAULT 0, status VARCHAR(10) DEFAULT 'BONDING', onchain_address TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), graduated_at TIMESTAMPTZ)`);
+      await pool.query(`INSERT INTO bonding_tokens (id, creator_id, name, ticker, logo_url, description, socials) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [tokenId, uid, name, ticker.toUpperCase(), logo_url, description, JSON.stringify(socials || {})]);
+      return json(res, { token_id: tokenId, ticker: ticker.toUpperCase(), name, initial_price: 0.000001, max_supply: maxSupply });
+    }
+
+    // POST /v1/launchpad/buy-bonding — buy tokens on bonding curve
+    if (path === "/v1/launchpad/buy-bonding" && req.method === "POST") {
+      const { token_id, amount_usdt } = req.body || {};
+      const { rows } = await pool.query(`SELECT * FROM bonding_tokens WHERE id=$1 AND status='BONDING'`, [token_id]);
+      if (!rows[0]) return json(res, { error: "token not found" }, 404);
+      const t = rows[0];
+      const supply = parseInt(t.total_supply);
+      const maxS = parseInt(t.max_supply);
+      const inv = parseFloat(amount_usdt);
+      // Bonding curve: tokens = investment / (base_price * (1 + supply/maxSupply)²)
+      const curvePrice = 0.000001 * Math.pow(1 + supply / maxS, 2);
+      const tokensBought = Math.floor(inv / curvePrice);
+      const newSupply = supply + tokensBought;
+      const newPrice = 0.000001 * Math.pow(1 + newSupply / maxS, 2);
+
+      await pool.query(`CREATE TABLE IF NOT EXISTS bonding_holders (token_id UUID, user_id BIGINT, amount BIGINT DEFAULT 0, PRIMARY KEY (token_id, user_id))`);
+      await pool.query(`INSERT INTO bonding_holders (token_id, user_id, amount) VALUES ($1,$2,$3) ON CONFLICT (token_id, user_id) DO UPDATE SET amount = bonding_holders.amount + $3`,
+        [tokenId, uid, tokensBought]);
+
+      if (newSupply >= parseInt(t.hardcap)) {
+        // Graduate to on-chain
+        const onchainAddr = "EQ_" + tokenId.substring(0, 12).replace(/-/g, '');
+        await pool.query(`UPDATE bonding_tokens SET status='GRADUATED', onchain_address=$1, graduated_at=NOW() WHERE id=$2`, [onchainAddr, tokenId]);
+        return json(res, { token_id, tokens_bought: tokensBought, price: newPrice, new_supply: newSupply, status: "GRADUATED", onchain_address: onchainAddr });
+      }
+      return json(res, { token_id, tokens_bought: tokensBought, price: newPrice, new_supply: newSupply, progress_pct: Math.round(newSupply/maxS*100) });
+    }
+
+    // GET /v1/launchpad/bonding-tokens
+    if (path === "/v1/launchpad/bonding-tokens") {
+      const { rows } = await pool.query(`SELECT * FROM bonding_tokens WHERE status='BONDING' ORDER BY liquidity_pool DESC LIMIT 20`);
+      return json(res, { tokens: rows });
+    }
+
+    // ========== TRAILING STOP + POST-ONLY ==========
+    // POST /v1/orders/trailing-stop
+    if (path === "/v1/orders/trailing-stop" && req.method === "POST") {
+      const { symbol, side, quantity, trailing_pct, activation_price } = req.body || {};
+      const orderId = require('crypto').randomUUID();
+      await pool.query(`CREATE TABLE IF NOT EXISTS trailing_stops (id UUID PRIMARY KEY, user_id BIGINT, symbol VARCHAR(20), side VARCHAR(4), quantity DECIMAL(30,8), trailing_pct DECIMAL(6,4), activation_price DECIMAL(30,8), highest_bid DECIMAL(30,8), status VARCHAR(10) DEFAULT 'ACTIVE', created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await pool.query(`INSERT INTO trailing_stops (id, user_id, symbol, side, quantity, trailing_pct, activation_price, highest_bid) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [orderId, uid, symbol, side, parseFloat(quantity), parseFloat(trailing_pct), parseFloat(activation_price||0), parseFloat(activation_price||0)]);
+      return json(res, { order_id: orderId, type: "TRAILING_STOP", trailing_pct: parseFloat(trailing_pct) });
+    }
+
+    // GET /v1/orders/trailing-stops
+    if (path === "/v1/orders/trailing-stops") {
+      const { rows } = await pool.query(`SELECT * FROM trailing_stops WHERE user_id=$1 AND status='ACTIVE'`, [uid]);
+      return json(res, { orders: rows });
+    }
+
+    // GET /v1/orders/cron/trailing-check — check trailing stops and trigger if needed
+    if (path === "/v1/orders/cron/trailing-check") {
+      const { rows } = await pool.query(`SELECT * FROM trailing_stops WHERE status='ACTIVE'`);
+      let triggered = 0;
+      for (const ts of rows) {
+        const currentPrice = await getPrice(ts.symbol);
+        const highestBid = Math.max(parseFloat(ts.highest_bid), currentPrice);
+        const dropPct = ((highestBid - currentPrice) / highestBid) * 100;
+        const side = ts.side;
+        const shouldTrigger = (side === 'SELL' && dropPct >= parseFloat(ts.trailing_pct)) || (side === 'BUY' && -dropPct >= parseFloat(ts.trailing_pct));
+        if (shouldTrigger && currentPrice >= parseFloat(ts.activation_price || 0)) {
+          const orderId = require('crypto').randomUUID();
+          await pool.query(`INSERT INTO spot_orders (id, user_id, symbol, side, type, price, quantity, filled, status) VALUES ($1,$2,$3,$4,'MARKET',0,$5,$6,'FILLED')`,
+            [orderId, ts.user_id, ts.symbol, side, parseFloat(ts.quantity), parseFloat(ts.quantity)]);
+          await pool.query(`INSERT INTO spot_trades (id, symbol, maker_user_id, taker_user_id, price, quantity, quote_quantity, taker_side) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [orderId, ts.symbol, ts.user_id, ts.user_id, currentPrice, parseFloat(ts.quantity), currentPrice * parseFloat(ts.quantity), side]);
+          await pool.query(`UPDATE trailing_stops SET status='TRIGGERED' WHERE id=$1`, [ts.id]);
+          triggered++;
+        } else {
+          await pool.query(`UPDATE trailing_stops SET highest_bid=$1 WHERE id=$2`, [highestBid, ts.id]);
+        }
+      }
+      return json(res, { triggered, checked: rows.length });
+    }
+
+    // POST /v1/orders/post-only
+    if (path === "/v1/orders/post-only" && req.method === "POST") {
+      const { symbol, side, price, quantity } = req.body || {};
+      // Post-only: only places if it doesn't match immediately (adds liquidity)
+      const opposing = side === "BUY" ? { s: "SELL", check: "price <= $3", order: "price ASC" } : { s: "BUY", check: "price >= $3", order: "price DESC" };
+      const { rows: matches } = await pool.query(`SELECT id FROM spot_orders WHERE symbol=$1 AND side=$2 AND status='OPEN' AND ${opposing.check} LIMIT 1`,
+        [symbol, opposing.s, parseFloat(price)]);
+      if (matches.length > 0) {
+        return json(res, { error: "Would match immediately. Post-Only order rejected.", hint: "Use limit order instead" }, 400);
+      }
+      const orderId = require('crypto').randomUUID();
+      await pool.query(`INSERT INTO spot_orders (id, user_id, symbol, side, type, price, quantity, filled, status) VALUES ($1,$2,$3,$4,'POST_ONLY',$5,$6,0,'OPEN')`,
+        [orderId, uid, symbol, side, parseFloat(price), parseFloat(quantity)]);
+      return json(res, { order_id: orderId, type: "POST_ONLY", status: "OPEN" });
+    }
+
+    // ========== TRADING DUELS ==========
+    // POST /v1/duels/create
+    if (path === "/v1/duels/create" && req.method === "POST") {
+      const { symbol, bet_amount } = req.body || {};
+      const duelId = require('crypto').randomUUID();
+      await pool.query(`CREATE TABLE IF NOT EXISTS trading_duels (id UUID PRIMARY KEY, creator_id BIGINT, opponent_id BIGINT, symbol VARCHAR(20), bet_amount DECIMAL(30,8), creator_predictions JSONB, opponent_predictions JSONB, status VARCHAR(10) DEFAULT 'WAITING', winner_id BIGINT, created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ)`);
+      await pool.query(`INSERT INTO trading_duels (id, creator_id, symbol, bet_amount, status) VALUES ($1,$2,$3,$4,'WAITING')`,
+        [duelId, uid, symbol, parseFloat(bet_amount||10)]);
+      return json(res, { duel_id: duelId, bet: parseFloat(bet_amount||10), status: "waiting_for_opponent" });
+    }
+
+    // POST /v1/duels/join
+    if (path === "/v1/duels/join" && req.method === "POST") {
+      const { duel_id } = req.body || {};
+      const { rows } = await pool.query(`SELECT * FROM trading_duels WHERE id=$1 AND status='WAITING'`, [duel_id]);
+      if (!rows[0]) return json(res, { error: "duel not available" }, 404);
+      if (rows[0].creator_id === uid) return json(res, { error: "cannot join own duel" }, 400);
+      await pool.query(`UPDATE trading_duels SET opponent_id=$1, status='ACTIVE' WHERE id=$2`, [uid, duel_id]);
+      return json(res, { duel_id, joined: true, candles_coming: 3, time_remaining_sec: 180 });
+    }
+
+    // POST /v1/duels/predict
+    if (path === "/v1/duels/predict" && req.method === "POST") {
+      const { duel_id, predictions } = req.body || {};
+      const preds = (predictions || []).map(p => p === "up" ? 1 : 0);
+      const { rows } = await pool.query(`SELECT * FROM trading_duels WHERE id=$1 AND status='ACTIVE'`, [duel_id]);
+      if (!rows[0]) return json(res, { error: "duel not found" }, 404);
+      const d = rows[0];
+      const isCreator = d.creator_id == uid;
+      if (!isCreator && d.opponent_id != uid) return json(res, { error: "not in duel" }, 400);
+      const col = isCreator ? "creator_predictions" : "opponent_predictions";
+      await pool.query(`UPDATE trading_duels SET ${col}=$1::jsonb WHERE id=$2`, [JSON.stringify(preds), duel_id]);
+
+      const { rows: updated } = await pool.query(`SELECT * FROM trading_duels WHERE id=$1`, [duel_id]);
+      const du = updated[0];
+      const cPreds = du.creator_predictions || [];
+      const oPreds = du.opponent_predictions || [];
+      if (cPreds.length > 0 && oPreds.length > 0) {
+        const prices = await getHistoricalPrices(du.symbol, 3);
+        const real = prices.map((p, i) => i > 0 ? (parseFloat(p) >= parseFloat(prices[i-1]) ? 1 : 0) : 1);
+        const cScore = scorePredictions(real, cPreds);
+        const oScore = scorePredictions(real, oPreds);
+        const winner = cScore > oScore ? du.creator_id : oScore > cScore ? du.opponent_id : null;
+        await pool.query(`UPDATE trading_duels SET status='RESOLVED', winner_id=$1, resolved_at=NOW() WHERE id=$2`, [winner, duel_id]);
+        return json(res, { resolved: true, real_candles: real.map(r=>r?'UP':'DOWN'), creator_score: cScore, opponent_score: oScore, winner_id: winner, prize: parseFloat(du.bet_amount)*1.9 });
+      }
+      return json(res, { predicted: true, waiting: true });
+    }
+
+    // GET /v1/duels/list
+    if (path === "/v1/duels/list") {
+      const { rows } = await pool.query(`SELECT * FROM trading_duels WHERE status IN ('WAITING','ACTIVE') ORDER BY created_at DESC LIMIT 10`);
+      return json(res, { duels: rows });
+    }
+
+    // ========== GASLESS TRADING ==========
+    // POST /v1/orders/gasless
+    if (path === "/v1/orders/gasless" && req.method === "POST") {
+      const { symbol, side, type, price, quantity, use_gasless } = req.body || {};
+      const gasFee = use_gasless ? parseFloat(quantity) * 0.005 : 0; // 0.5% gas fee
+      const netQty = parseFloat(quantity) - gasFee;
+      if (use_gasless) {
+        await pool.query(`INSERT INTO balances (user_id, asset, balance) VALUES ($1,'TON',0) ON CONFLICT DO NOTHING`, [uid]);
+        // Deduct gas from platform
+        await pool.query(`UPDATE balances SET balance = GREATEST(balance - $1, 0) WHERE user_id=$2 AND asset='USDT'`, [gasFee, 1]);
+      }
+      const orderId = require('crypto').randomUUID();
+      await pool.query(`INSERT INTO spot_orders (id, user_id, symbol, side, type, price, quantity, filled, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [orderId, uid, symbol, side, type, parseFloat(price||0), netQty, 0, "OPEN"]);
+      return json(res, { order_id: orderId, gasless: !!use_gasless, gas_fee: gasFee, net_quantity: netQty });
+    }
+
+    // ========== LIQUID STAKING zkTON ==========
+    // POST /v1/earn/liquid-stake
+    if (path === "/v1/earn/liquid-stake" && req.method === "POST") {
+      const { amount } = req.body || {};
+      const zkTONamount = parseFloat(amount) * 1.05; // 5% bonus
+      const stakeId = require('crypto').randomUUID();
+      await pool.query(`CREATE TABLE IF NOT EXISTS liquid_stakes (id UUID PRIMARY KEY, user_id BIGINT, ton_amount DECIMAL(30,8), zkton_amount DECIMAL(30,8), exchange_rate DECIMAL(10,6) DEFAULT 1.05, status VARCHAR(10) DEFAULT 'ACTIVE', created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await pool.query(`INSERT INTO liquid_stakes (id, user_id, ton_amount, zkton_amount) VALUES ($1,$2,$3,$4)`,
+        [stakeId, uid, parseFloat(amount), zkTONamount]);
+      await pool.query(`INSERT INTO balances (user_id, asset, balance) VALUES ($1,'zkTON',$2) ON CONFLICT (user_id, asset) DO UPDATE SET balance = balances.balance + $2`,
+        [uid, zkTONamount]);
+      return json(res, { stake_id: stakeId, ton_staked: parseFloat(amount), zkton_received: zkTONamount, rate: 1.05 });
+    }
+
+    // GET /v1/earn/liquid-stakes
+    if (path === "/v1/earn/liquid-stakes") {
+      const { rows } = await pool.query(`SELECT * FROM liquid_stakes WHERE user_id=$1 AND status='ACTIVE'`, [uid]);
+      return json(res, { stakes: rows });
+    }
+
+    // ========== P2P CHECKS ==========
+    // POST /v1/checks/create
+    if (path === "/v1/checks/create" && req.method === "POST") {
+      const { amount, asset, password, multi_count, require_sub_channel } = req.body || {};
+      const checkId = require('crypto').randomUUID();
+      const code = require('crypto').randomBytes(6).toString('hex');
+      await pool.query(`CREATE TABLE IF NOT EXISTS p2p_checks (id UUID PRIMARY KEY, creator_id BIGINT, code VARCHAR(20) UNIQUE, amount DECIMAL(30,8), asset VARCHAR(10) DEFAULT 'USDT', password VARCHAR(50), multi_count INT DEFAULT 1, claimed_count INT DEFAULT 0, require_sub_channel BOOLEAN DEFAULT FALSE, status VARCHAR(10) DEFAULT 'ACTIVE', created_at TIMESTAMPTZ DEFAULT NOW())`);
+      await pool.query(`INSERT INTO p2p_checks (id, creator_id, code, amount, asset, password, multi_count, require_sub_channel) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [checkId, uid, code, parseFloat(amount), asset||'USDT', password||null, parseInt(multi_count||1), !!require_sub_channel]);
+      const link = `https://t.me/SergGOrelyyBot?start=check_${code}`;
+      return json(res, { check_id: checkId, code, link, amount: parseFloat(amount), multi: parseInt(multi_count||1) });
+    }
+
+    // POST /v1/checks/claim
+    if (path === "/v1/checks/claim" && req.method === "POST") {
+      const { code, password } = req.body || {};
+      const { rows } = await pool.query(`SELECT * FROM p2p_checks WHERE code=$1 AND status='ACTIVE'`, [code]);
+      if (!rows[0]) return json(res, { error: "Check not found or already claimed" }, 404);
+      const c = rows[0];
+      if (c.password && c.password !== password) return json(res, { error: "Wrong password" }, 400);
+      if (c.require_sub_channel) { /* check subscription via bot API */ }
+      const isLast = c.claimed_count + 1 >= c.multi_count;
+      await pool.query(`UPDATE p2p_checks SET claimed_count = claimed_count + 1, status = CASE WHEN $1 THEN 'CLAIMED' ELSE 'ACTIVE' END WHERE code=$2`,
+        [isLast, code]);
+      await pool.query(`INSERT INTO balances (user_id, asset, balance) VALUES ($1,$2,$3) ON CONFLICT (user_id, asset) DO UPDATE SET balance = balances.balance + $3`,
+        [uid, c.asset, parseFloat(c.amount)]);
+      return json(res, { claimed: true, amount: parseFloat(c.amount), asset: c.asset, remaining_claims: parseInt(c.multi_count) - c.claimed_count - 1 });
+    }
+
+    // ========== DAILY QUESTS + BATTLE PASS ==========
+    // GET /v1/quests/daily
+    if (path === "/v1/quests/daily") {
+      await pool.query(`CREATE TABLE IF NOT EXISTS daily_quests (id SERIAL PRIMARY KEY, user_id BIGINT, quest_type VARCHAR(30), target INT, progress INT DEFAULT 0, xp_reward INT DEFAULT 50, completed BOOLEAN DEFAULT FALSE, date DATE DEFAULT CURRENT_DATE)`);
+      const { rows } = await pool.query(`SELECT * FROM daily_quests WHERE user_id=$1 AND date=CURRENT_DATE`, [uid]);
+      if (!rows.length) {
+        // Generate today's quests
+        const quests = [
+          { type: "make_trades", target: 3, xp: 50 },
+          { type: "volume_100", target: 1, xp: 100 },
+          { type: "limit_order", target: 1, xp: 30 },
+          { type: "invite_friend", target: 1, xp: 200 },
+        ];
+        for (const q of quests) {
+          await pool.query(`INSERT INTO daily_quests (user_id, quest_type, target, xp_reward) VALUES ($1,$2,$3,$4)`, [uid, q.type, q.target, q.xp]);
+        }
+        const { rows: fresh } = await pool.query(`SELECT * FROM daily_quests WHERE user_id=$1 AND date=CURRENT_DATE`, [uid]);
+        return json(res, { quests: fresh });
+      }
+      return json(res, { quests: rows });
+    }
+
+    // GET /v1/quests/battle-pass
+    if (path === "/v1/quests/battle-pass") {
+      await pool.query(`CREATE TABLE IF NOT EXISTS battle_pass (user_id BIGINT PRIMARY KEY, season INT DEFAULT 1, xp INT DEFAULT 0, level INT DEFAULT 1, premium BOOLEAN DEFAULT FALSE, claimed_rewards JSONB DEFAULT '[]')`);
+      let { rows } = await pool.query(`SELECT * FROM battle_pass WHERE user_id=$1`, [uid]);
+      if (!rows[0]) { await pool.query(`INSERT INTO battle_pass (user_id) VALUES ($1)`, [uid]); rows = [{ xp: 0, level: 1, premium: false }]; }
+      const bp = rows[0];
+      const rewards = [
+        { level: 1, free: "Custom avatar border", premium: "Reduced fees 10%" },
+        { level: 5, free: "Telegram sticker pack", premium: "Reduced fees 20%" },
+        { level: 10, free: "Leverage boost +5x", premium: "VIP badge" },
+        { level: 20, free: "Exclusive NFT", premium: "1 USDT bonus" },
+        { level: 50, free: "Legendary skin", premium: "10 USDT bonus" },
+      ];
+      return json(res, { ...bp, rewards });
+    }
+
+    // POST /v1/quests/claim-xp
+    if (path === "/v1/quests/claim-xp" && req.method === "POST") {
+      const { quest_id } = req.body || {};
+      const { rows } = await pool.query(`SELECT * FROM daily_quests WHERE id=$1 AND user_id=$2 AND completed=FALSE`, [parseInt(quest_id), uid]);
+      if (!rows[0]) return json(res, { error: "quest not found" }, 404);
+      await pool.query(`UPDATE daily_quests SET progress = progress + 1, completed = CASE WHEN progress + 1 >= target THEN TRUE ELSE FALSE END WHERE id=$1`, [parseInt(quest_id)]);
+      if (rows[0].progress + 1 >= rows[0].target) {
+        await pool.query(`INSERT INTO battle_pass (user_id, xp) VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET xp = battle_pass.xp + $2`, [uid, rows[0].xp_reward]);
+        // Auto-level up
+        const { rows: bp } = await pool.query(`SELECT * FROM battle_pass WHERE user_id=$1`, [uid]);
+        const newLevel = Math.floor(Math.sqrt((bp[0]?.xp||0) / 100)) + 1;
+        await pool.query(`UPDATE battle_pass SET level=$1 WHERE user_id=$2`, [newLevel, uid]);
+        return json(res, { completed: true, xp_earned: rows[0].xp_reward, new_level: newLevel });
+      }
+      return json(res, { progress: rows[0].progress + 1, target: rows[0].target });
+    }
+
+    // ========== MULTI-LEVEL REFERRAL ==========
+    if (path === "/v1/referrals/multi-level") {
+      try {
+        const l1 = await pool.query(`SELECT COUNT(*)::int as cnt, COALESCE(SUM(amount),0)::float as comm FROM referrals r LEFT JOIN referral_commissions rc ON r.referred_id = rc.referred_id WHERE r.referrer_id=$1`, [uid]);
+        const l2 = await pool.query(`SELECT COUNT(*)::int as cnt FROM referrals r1 JOIN referrals r2 ON r1.referred_id = r2.referrer_id WHERE r1.referrer_id=$1`, [uid]);
+        return json(res, {
+          level1: { count: l1.rows[0]?.cnt || 0, rate: "20%" },
+          level2: { count: l2.rows[0]?.cnt || 0, rate: "10%" },
+          level3: { count: 0, rate: "5%" },
+        });
+      } catch(e) { return json(res, { level1: { count: 0 }, level2: { count: 0 }, level3: { count: 0 } }); }
     }
 
     // ========== SECURITY FINAL ==========

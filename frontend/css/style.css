@@ -150,3 +150,41 @@ body {
     .tab { font-size: 10px; padding: 10px 4px; }
     .offer-card .amount { font-size: 16px; }
 }
+
+/* Exchange v2 trading UI */
+.exchange-layout { display: flex; gap: 10px; flex-wrap: wrap; }
+.ex-left { flex: 1; min-width: 180px; }
+.ex-right { flex: 1; min-width: 200px; }
+.ex-section {
+    background: var(--bg-secondary, #161b22); border: 1px solid var(--border, #30363d);
+    border-radius: 12px; padding: 12px; margin-bottom: 10px;
+}
+.ob-table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
+.ob-table th { color: #8b949e; font-weight: 500; padding: 2px 4px; text-align: right; }
+.ob-table td { padding: 1px 4px; text-align: right; }
+
+.side-btn {
+    flex: 1; padding: 10px; font-weight: 700; font-size: 14px; border-radius: 8px; cursor: pointer;
+    background: #21262d; color: #8b949e; border: 1px solid #30363d; text-align: center; transition: all .15s;
+}
+.side-active-green { background: #238636 !important; color: #fff !important; border-color: #238636 !important; }
+.side-active-red { background: #da3633 !important; color: #fff !important; border-color: #da3633 !important; }
+
+.pos-card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px; margin-bottom: 8px;
+}
+.earn-card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 14px; text-align: center;
+}
+.earn-card:hover { border-color: #f0b90b; }
+
+.select { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; padding: 8px 10px; font-size: 13px; width: 100%; }
+.input { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9; padding: 10px; font-size: 14px; width: 100%; }
+.input:focus, .select:focus { border-color: #f0b90b; outline: none; }
+.btn { padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; border: none; }
+.btn-primary { background: #f0b90b; color: #000; }
+.btn-green { background: #238636; color: #fff; }
+.btn-red { background: #da3633; color: #fff; }
+.btn-block { width: 100%; }
+.btn-cancel { background: #21262d; color: #8b949e; }
+
