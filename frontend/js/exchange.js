@@ -32,6 +32,51 @@ const spotPairs = [
 ];
 
 let currentSpotSymbol = 'TON_USDT';
+let chart = null;
+let candleSeries = null;
+let volumeSeries = null;
+
+async function initChart() {
+    const container = document.getElementById('tvChart');
+    if (!container || !window.LightweightCharts) return;
+
+    if (chart) { chart.remove(); chart = null; }
+
+    chart = window.LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: 350,
+        layout: { background: { type: 'solid', color: '#0d1117' }, textColor: '#8b949e' },
+        grid: { vertLines: { color: '#1e2329' }, horzLines: { color: '#1e2329' } },
+        crosshair: { mode: 0 },
+        timeScale: { borderColor: '#30363d', timeVisible: true },
+        rightPriceScale: { borderColor: '#30363d' },
+    });
+
+    candleSeries = chart.addCandlestickSeries({
+        upColor: '#0ecb81', downColor: '#f6465d', borderDownColor: '#f6465d',
+        borderUpColor: '#0ecb81', wickDownColor: '#f6465d', wickUpColor: '#0ecb81',
+    });
+
+    volumeSeries = chart.addHistogramSeries({
+        color: '#26a69a20', priceFormat: { type: 'volume' },
+        priceScaleId: '',
+    });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+
+    await loadChartData(currentSpotSymbol);
+    setInterval(function() { loadChartData(currentSpotSymbol); }, 30000);
+}
+
+async function loadChartData(symbol) {
+    if (!candleSeries) return;
+    try {
+        const r = await fetch(`/api/v1/klines?symbol=${symbol}&interval=1h&limit=200`).then(r => r.json());
+        if (r.klines && r.klines.length) {
+            candleSeries.setData(r.klines);
+            volumeSeries.setData(r.klines.map(function(k) { return { time: k.time, value: k.volume, color: k.close >= k.open ? '#0ecb8120' : '#f6465d20' }; }));
+        }
+    } catch(e) {}
+}
 
 function initSpotTab() {
     const pairsEl = document.getElementById('spotPairs');
@@ -42,7 +87,9 @@ function initSpotTab() {
         currentSpotSymbol = this.value;
         loadOrderBook();
         loadTicker();
+        loadChartData(currentSpotSymbol);
     };
+    initChart();
     loadOrderBook();
     loadTicker();
     setInterval(loadOrderBook, 5000);
